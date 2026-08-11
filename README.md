@@ -3,7 +3,7 @@
 Isomite is an Obsidian plugin for controlled vault synchronization through a private [Cloudflare R2](https://developers.cloudflare.com/r2/) bucket. It connects directly from Obsidian to R2 without a VPS, Worker, or custom synchronization server.
 
 > [!IMPORTANT]
-> The published `0.2.0` release provides R2 setup and encryption initialization. Synchronization is currently being developed for the next release; use only copied test vaults and dedicated buckets until that release is published.
+> Synchronization is new in `0.3.0`. Start with a copied test vault and a dedicated empty R2 bucket, and keep an independent backup while evaluating it.
 
 ## Current features
 
@@ -49,7 +49,7 @@ After Isomite is accepted into the Obsidian Community Plugins directory:
 ## Connect Cloudflare R2
 
 1. Create a dedicated private R2 bucket for the vault.
-2. Create an R2 API token scoped to that bucket with **Object Read & Write** permission. Isomite writes only its encryption metadata for now; synchronization will require the same permission in later versions.
+2. Create an R2 API token scoped to that bucket with **Object Read & Write** permission.
 3. Copy the token's **Access Key ID** and **Secret Access Key** when Cloudflare displays them.
 4. In Obsidian, open **Settings → Isomite** and enter:
    - **S3 API endpoint:** `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`
@@ -65,18 +65,18 @@ A bucket URL ending in `/<bucket>` is also accepted. Isomite immediately separat
 
 ## Network use and privacy
 
-Isomite makes direct HTTPS requests only to the Cloudflare R2 S3 API endpoint configured by the user. These requests are necessary to inspect and, in future releases, synchronize the selected private bucket. Isomite has no developer-operated backend, analytics, telemetry, advertising, or account system.
+Isomite makes direct HTTPS requests only to the Cloudflare R2 S3 API endpoint configured by the user. These requests inspect and synchronize the selected private bucket. Isomite has no developer-operated backend, analytics, telemetry, advertising, or account system.
 
 The endpoint, bucket name, Access Key ID, Secret Access Key, encryption passphrase, and any imported recovery key are stored by Obsidian in `.obsidian/plugins/isomite/data.json`. Obsidian plugin settings are plaintext local data, so protect the device and vault accordingly. Sync baselines and crash journals stored there are separately encrypted. Isomite never uploads its own plugin folder. Do not commit or share `data.json`.
 
-The encryption metadata object contains a random salt and encrypted key verifier. The salt is not secret, and the verifier does not reveal the passphrase. Future vault content will be encrypted before upload; filenames and paths will not be stored as readable R2 object keys.
+The encryption metadata object contains a random salt and encrypted key verifier. The salt is not secret, and the verifier does not reveal the passphrase. Vault content and revision metadata are encrypted before upload; filenames and paths are not stored as readable R2 object keys.
 
 ## Current safety limits
 
 - The connection test never writes to or deletes from R2.
 - **Verify encryption** creates only `_isomite/encryption-v1.json`; it does not upload vault files.
 - The first approved upload creates a local ZIP under `.isomite-backups/` before changing R2; this folder is never synchronized.
-- Do not run future synchronization builds alongside Obsidian Sync, Twine, LiveSync, or another vault synchronization system.
+- Do not run Isomite alongside Obsidian Sync, Twine, LiveSync, or another vault synchronization system.
 - Use a dedicated test bucket and a copied vault while Isomite is under development.
 
 ## Development
