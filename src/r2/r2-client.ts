@@ -9,6 +9,8 @@ export interface R2Credentials {
 
 export interface R2TransportResponse {
 	status: number;
+	headers: Record<string, string>;
+	body: Uint8Array;
 	text: string;
 }
 
@@ -25,10 +27,39 @@ export interface R2ConnectionResult {
 	objectCount: number;
 }
 
+export interface R2GetResult {
+	body: Uint8Array;
+	etag: string;
+}
+
+export interface R2PutOptions {
+	contentType?: string;
+	ifMatch?: string;
+	ifNoneMatch?: "*";
+}
+
+export interface R2PutResult {
+	etag: string;
+}
+
+export class R2NotFoundError extends Error {
+	constructor(key: string) {
+		super(`R2 object not found: ${key}`);
+		this.name = "R2NotFoundError";
+	}
+}
+
+export class R2PreconditionFailedError extends Error {
+	constructor() {
+		super("R2 object changed before the conditional request completed.");
+		this.name = "R2PreconditionFailedError";
+	}
+}
+
 /**
  * Small Cloudflare R2 client that signs path-style S3 REST requests with AWS
- * Signature Version 4. It intentionally uses WebCrypto instead of the AWS
- * SDK so the same code can run in Obsidian's desktop and mobile sandboxes.
+ * Signature Version 4. It uses WebCrypto rather than the AWS SDK so the same
+ * implementation works in Obsidian on desktop and mobile.
  */
 export class R2Client {
 	constructor(
@@ -37,27 +68,42 @@ export class R2Client {
 	) {}
 
 	async testConnection(): Promise<R2ConnectionResult> {
-		const xml = await this.listFirstPage();
-		return { objectCount: countListedObjects(xml) };
-	}
-
-	private async listFirstPage(): Promise<string> {
 		const response = await this.signedRequest({
 			method: "GET",
 			key: "",
 			query: { "list-type": "2", "max-keys": "1" },
 		});
+		assertSuccess("LIST", response);
+		return { objectCount: countListedObjects(response.text) };
+	}
 
-		if (response.status < 200 || response.status >= 300) {
-			throw new Error(formatR2Error("LIST", response.status, response.text));
-		}
-		return response.text;
+	async getObject(key: string): Promise<R2GetResult> {
+		const response = await this.signedRequest({ method: "GET", key });
+		if (response.status === 404) throw new R2NotFoundError(key);
+		assertSuccess(`GET ${key}`, response);
+		return {
+			body: response.body,
+			etag: normalizeEtag(getHeader(response.headers, "etag")),
+		};
+	}
+
+	async putObject(key: string, body: Uint8Array, options: R2PutOptions = {}): Promise<R2PutResult> {
+		const headers: Record<string, string> = {};
+		if (options.contentType) headers["content-type"] = options.contentType;
+		if (options.ifMatch) headers["if-match"] = options.ifMatch;
+		if (options.ifNoneMatch) headers["if-none-match"] = options.ifNoneMatch;
+
+		const response = await this.signedRequest({ method: "PUT", key, headers, body });
+		if (response.status === 412) throw new R2PreconditionFailedError();
+		assertSuccess(`PUT ${key}`, response);
+		return { etag: normalizeEtag(getHeader(response.headers, "etag")) };
 	}
 
 	private async signedRequest(request: {
 		method: string;
 		key: string;
 		query?: Record<string, string>;
+		headers?: Record<string, string>;
 		body?: Uint8Array;
 	}): Promise<R2TransportResponse> {
 		const credentials = validateCredentials(this.credentials);
@@ -68,11 +114,17 @@ export class R2Client {
 		const canonicalUri = `/${encodePathSegment(credentials.bucket)}/${encodeObjectKey(request.key)}`;
 		const canonicalQuery = canonicalizeQuery(request.query ?? {});
 
-		const canonicalHeaders =
-			`host:${endpoint.host}\n` +
-			`x-amz-content-sha256:${bodyHash}\n` +
-			`x-amz-date:${amzDate}\n`;
-		const signedHeaders = "host;x-amz-content-sha256;x-amz-date";
+		const headers = normalizeHeaders({
+			host: endpoint.host,
+			"x-amz-content-sha256": bodyHash,
+			"x-amz-date": amzDate,
+			...(request.headers ?? {}),
+		});
+		const signedHeaderNames = Object.keys(headers).sort();
+		const canonicalHeaders = signedHeaderNames
+			.map((name) => `${name}:${normalizeHeaderValue(headers[name])}\n`)
+			.join("");
+		const signedHeaders = signedHeaderNames.join(";");
 		const canonicalRequest = [
 			request.method,
 			canonicalUri,
@@ -96,13 +148,11 @@ export class R2Client {
 			`SignedHeaders=${signedHeaders}, Signature=${signature}`;
 		const url = `${endpoint.origin}${canonicalUri}${canonicalQuery ? `?${canonicalQuery}` : ""}`;
 
+		const transportHeaders: Record<string, string> = { ...headers, authorization };
+		delete transportHeaders.host;
 		return this.transport(url, {
 			method: request.method,
-			headers: {
-				"x-amz-content-sha256": bodyHash,
-				"x-amz-date": amzDate,
-				authorization,
-			},
+			headers: transportHeaders,
 			body: request.body,
 		});
 	}
@@ -157,6 +207,16 @@ function canonicalizeQuery(query: Record<string, string>): string {
 		.join("&");
 }
 
+function normalizeHeaders(headers: Record<string, string>): Record<string, string> {
+	const normalized: Record<string, string> = {};
+	for (const [name, value] of Object.entries(headers)) normalized[name.toLowerCase()] = value;
+	return normalized;
+}
+
+function normalizeHeaderValue(value: string): string {
+	return value.trim().replace(/\s+/g, " ");
+}
+
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
 	return hex(await crypto.subtle.digest("SHA-256", asBufferSource(bytes)));
 }
@@ -187,7 +247,13 @@ function hex(buffer: ArrayBuffer): string {
 }
 
 function countListedObjects(xml: string): number {
-	return xml.match(/<Contents>/g)?.length ?? 0;
+	const keyCount = Number(extractXml(xml, "KeyCount"));
+	return Number.isFinite(keyCount) && keyCount >= 0 ? keyCount : (xml.match(/<Contents>/g)?.length ?? 0);
+}
+
+function assertSuccess(operation: string, response: R2TransportResponse): void {
+	if (response.status >= 200 && response.status < 300) return;
+	throw new Error(formatR2Error(operation, response.status, response.text));
 }
 
 function formatR2Error(operation: string, status: number, body: string): string {
@@ -209,4 +275,13 @@ function decodeXml(value: string): string {
 		.replace(/&gt;/g, ">")
 		.replace(/&quot;/g, '"')
 		.replace(/&apos;/g, "'");
+}
+
+function getHeader(headers: Record<string, string>, requestedName: string): string {
+	const entry = Object.entries(headers).find(([name]) => name.toLowerCase() === requestedName.toLowerCase());
+	return entry?.[1] ?? "";
+}
+
+function normalizeEtag(value: string): string {
+	return value.replace(/&quot;/g, "").replace(/"/g, "");
 }

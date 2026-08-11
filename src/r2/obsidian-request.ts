@@ -17,6 +17,8 @@ export const obsidianR2Transport: R2Transport = async (url, init) => {
 
 	return {
 		status: response.status,
+		headers: response.headers,
+		body: new Uint8Array(response.arrayBuffer),
 		text: response.text,
 	};
 };

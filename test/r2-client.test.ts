@@ -8,6 +8,15 @@ const credentials = {
 	secretAccessKey: "secret-key",
 };
 
+function response(status: number, text = "", headers: Record<string, string> = {}): Awaited<ReturnType<R2Transport>> {
+	return {
+		status,
+		headers,
+		body: new TextEncoder().encode(text),
+		text,
+	};
+}
+
 describe("R2Client", () => {
 	it("uses a signed, read-only ListObjectsV2 request for connection tests", async () => {
 		let capturedUrl = "";
@@ -15,10 +24,7 @@ describe("R2Client", () => {
 		const transport: R2Transport = async (url, init) => {
 			capturedUrl = url;
 			capturedInit = init;
-			return {
-				status: 200,
-				text: "<ListBucketResult><Contents></Contents></ListBucketResult>",
-			};
+			return response(200, "<ListBucketResult><KeyCount>1</KeyCount><Contents></Contents></ListBucketResult>");
 		};
 
 		const result = await new R2Client(credentials, transport).testConnection();
@@ -32,10 +38,8 @@ describe("R2Client", () => {
 	});
 
 	it("surfaces Cloudflare's XML error code and message", async () => {
-		const transport: R2Transport = async () => ({
-			status: 403,
-			text: "<Error><Code>AccessDenied</Code><Message>Access denied</Message></Error>",
-		});
+		const transport: R2Transport = async () =>
+			response(403, "<Error><Code>AccessDenied</Code><Message>Access denied</Message></Error>");
 
 		await expect(new R2Client(credentials, transport).testConnection()).rejects.toThrow(
 			"LIST failed with HTTP 403 (AccessDenied: Access denied)"
@@ -46,12 +50,32 @@ describe("R2Client", () => {
 		let called = false;
 		const transport: R2Transport = async () => {
 			called = true;
-			return { status: 200, text: "" };
+			return response(200);
 		};
 
 		await expect(new R2Client({ ...credentials, bucket: "" }, transport).testConnection()).rejects.toThrow(
 			"Enter the R2 bucket name."
 		);
 		expect(called).toBe(false);
+	});
+
+	it("signs conditional object writes and returns a normalized ETag", async () => {
+		let capturedInit: Parameters<R2Transport>[1] | undefined;
+		const transport: R2Transport = async (_url, init) => {
+			capturedInit = init;
+			return response(200, "", { etag: '"abc123"' });
+		};
+
+		const result = await new R2Client(credentials, transport).putObject("_isomite/meta.json", new Uint8Array([1]), {
+			contentType: "application/json",
+			ifNoneMatch: "*",
+		});
+
+		expect(result.etag).toBe("abc123");
+		expect(capturedInit?.headers["content-type"]).toBe("application/json");
+		expect(capturedInit?.headers["if-none-match"]).toBe("*");
+		expect(capturedInit?.headers.authorization).toContain(
+			"SignedHeaders=content-type;host;if-none-match;x-amz-content-sha256;x-amz-date"
+		);
 	});
 });
