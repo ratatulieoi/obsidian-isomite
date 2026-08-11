@@ -1,0 +1,9 @@
+node_modules/
+main.js
+*.js.map
+data.json
+dist/
+coverage/
+.env*
+!.env.example
+.DS_Store

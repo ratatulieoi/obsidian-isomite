@@ -1,0 +1,25 @@
+{
+  "name": "isomite",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Connect an Obsidian vault to a private Cloudflare R2 bucket for controlled synchronization.",
+  "main": "main.js",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ratatulieoi/isomite.git"
+  },
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc --noEmit --skipLibCheck && node esbuild.config.mjs production",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "esbuild": "^0.25.0",
+    "obsidian": "latest",
+    "typescript": "^5.8.0",
+    "vitest": "^3.0.0"
+  }
+}

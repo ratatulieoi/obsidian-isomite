@@ -1,0 +1,78 @@
+# Isomite
+
+Isomite is an Obsidian plugin for controlled vault synchronization through a private [Cloudflare R2](https://developers.cloudflare.com/r2/) bucket. It connects directly from Obsidian to R2 without a VPS, Worker, or custom synchronization server.
+
+> [!IMPORTANT]
+> Version 0.1.0 provides R2 connection setup and a read-only connection test. It does **not** upload, download, or synchronize vault files yet. This early release is intended to verify installation and R2 connectivity before synchronization behavior is added.
+
+## Features in 0.1.0
+
+- Configure a Cloudflare R2 S3 API endpoint and bucket.
+- Store bucket-scoped R2 credentials in the plugin's local Obsidian data.
+- Test the connection with a signed, read-only S3 `ListObjectsV2` request.
+- Work on Obsidian desktop and mobile using Obsidian's `requestUrl()` API.
+- Avoid browser CORS limitations without operating a separate backend.
+
+## Install
+
+### Community Plugins
+
+After Isomite is accepted into the Obsidian Community Plugins directory:
+
+1. Open **Settings → Community plugins** in Obsidian.
+2. Select **Browse** and search for **Isomite**.
+3. Install and enable the plugin.
+
+### Install the beta now with BRAT
+
+1. Install [BRAT](https://obsidian.md/plugins?id=obsidian42-brat) from Community Plugins.
+2. Open **Settings → BRAT → Add beta plugin**.
+3. Enter `https://github.com/ratatulieoi/isomite`.
+4. Enable **Isomite** under Community Plugins.
+
+### Manual installation
+
+1. Download `main.js` and `manifest.json` from the matching [GitHub release](https://github.com/ratatulieoi/isomite/releases).
+2. Create `<vault>/.obsidian/plugins/isomite/`.
+3. Copy both files into that directory.
+4. Reload Obsidian and enable **Isomite** under Community Plugins.
+
+## Connect Cloudflare R2
+
+1. Create a dedicated private R2 bucket for the vault.
+2. Create an R2 API token scoped to that bucket with **Object Read & Write** permission. Isomite 0.1.0 performs only a read-only connection test, but synchronization will require write access in later versions.
+3. Copy the token's **Access Key ID** and **Secret Access Key** when Cloudflare displays them.
+4. In Obsidian, open **Settings → Isomite** and enter:
+   - **S3 API endpoint:** `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`
+   - **Bucket:** the dedicated bucket name
+   - **Access key ID**
+   - **Secret access key**
+5. Select **Test connection**.
+
+A bucket URL ending in `/<bucket>` is also accepted; Isomite separates the endpoint and bucket automatically.
+
+## Network use and privacy
+
+Isomite makes direct HTTPS requests only to the Cloudflare R2 S3 API endpoint configured by the user. These requests are necessary to inspect and, in future releases, synchronize the selected private bucket. Isomite has no developer-operated backend, analytics, telemetry, advertising, or account system.
+
+The endpoint, bucket name, Access Key ID, and Secret Access Key are stored by Obsidian in `.obsidian/plugins/isomite/data.json`. Obsidian plugin settings are plaintext local data, so protect the device and vault accordingly. Isomite never intentionally uploads its own `data.json` file. Do not commit or share that file.
+
+## Current safety limits
+
+- The 0.1.0 connection test never writes to or deletes from R2.
+- Do not run future synchronization builds alongside Obsidian Sync, Twine, LiveSync, or another vault synchronization system.
+- Use a dedicated test bucket and a copied vault while Isomite is under development.
+
+## Development
+
+```bash
+npm install
+npm test
+npm run build
+```
+
+The production bundle is written to `main.js`.
+
+## License
+
+[MIT](LICENSE)
