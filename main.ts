@@ -25,7 +25,7 @@ export default class IsomitePlugin extends Plugin {
 	settings: IsomiteSettings = { ...DEFAULT_SETTINGS };
 	private cachedEncryptionKeys?: DerivedKeys;
 	private syncBusy = false;
-	private syncRescanQueued = false;
+	private syncRescanQueued?: "manual" | "automatic";
 	private saveSyncTimer?: number;
 
 	async onload(): Promise<void> {
@@ -34,14 +34,14 @@ export default class IsomitePlugin extends Plugin {
 		this.addCommand({
 			id: "sync-review",
 			name: "Review and sync vault",
-			callback: () => void this.reviewAndSync(),
+			callback: () => void this.reviewAndSync(false),
 		});
 		this.registerEvent(this.app.vault.on("modify", () => this.scheduleSaveReview()));
 		this.registerEvent(this.app.vault.on("create", () => this.scheduleSaveReview()));
 		this.registerEvent(this.app.vault.on("delete", () => this.scheduleSaveReview()));
 		this.registerEvent(this.app.vault.on("rename", () => this.scheduleSaveReview()));
 		this.app.workspace.onLayoutReady(() => {
-			if (this.settings.syncOnStartup) window.setTimeout(() => void this.reviewAndSync(), 2_000);
+			if (this.settings.syncOnStartup) window.setTimeout(() => void this.reviewAndSync(true), 2_000);
 		});
 	}
 
@@ -112,9 +112,9 @@ export default class IsomitePlugin extends Plugin {
 		this.cachedEncryptionKeys = undefined;
 	}
 
-	async reviewAndSync(): Promise<void> {
+	async reviewAndSync(automatic = false): Promise<void> {
 		if (this.syncBusy) {
-			this.syncRescanQueued = true;
+			if (!automatic || !this.syncRescanQueued) this.syncRescanQueued = automatic ? "automatic" : "manual";
 			return;
 		}
 		this.syncBusy = true;
@@ -181,7 +181,12 @@ export default class IsomitePlugin extends Plugin {
 				JSON.stringify([...requestedIgnorePatterns].sort()) !== JSON.stringify([...planned.remoteIgnorePatterns].sort());
 			planned.plan.ignoreRulesChanged = ignoreRulesChanged;
 			if (!changes.length && !ignoreRulesChanged) {
-				new Notice("Isomite is up to date.");
+				if (!automatic) new Notice("Isomite is up to date.");
+				return;
+			}
+			if (automatic) {
+				const changeCount = changes.length + (ignoreRulesChanged ? 1 : 0);
+				new Notice(`Isomite found ${changeCount} pending change${changeCount === 1 ? "" : "s"}. Run “Review and sync vault” to inspect them.`);
 				return;
 			}
 			const review = await new SyncReviewModal(this.app, planned.plan).openAndWait();
@@ -216,8 +221,9 @@ export default class IsomitePlugin extends Plugin {
 		} finally {
 			this.syncBusy = false;
 			if (this.syncRescanQueued) {
-				this.syncRescanQueued = false;
-				window.setTimeout(() => void this.reviewAndSync(), 0);
+				const queued = this.syncRescanQueued;
+				this.syncRescanQueued = undefined;
+				window.setTimeout(() => void this.reviewAndSync(queued === "automatic"), 0);
 			}
 		}
 	}
@@ -237,7 +243,7 @@ export default class IsomitePlugin extends Plugin {
 		if (this.saveSyncTimer !== undefined) window.clearTimeout(this.saveSyncTimer);
 		this.saveSyncTimer = window.setTimeout(() => {
 			this.saveSyncTimer = undefined;
-			void this.reviewAndSync();
+			void this.reviewAndSync(true);
 		}, 30_000);
 	}
 
