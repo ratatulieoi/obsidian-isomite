@@ -32,6 +32,19 @@ export interface R2GetResult {
 	etag: string;
 }
 
+export interface R2ListedObject {
+	key: string;
+	etag: string;
+	size: number;
+	lastModified: string;
+}
+
+export interface R2ListResult {
+	objects: R2ListedObject[];
+	isTruncated: boolean;
+	nextContinuationToken?: string;
+}
+
 export interface R2PutOptions {
 	contentType?: string;
 	ifMatch?: string;
@@ -77,6 +90,14 @@ export class R2Client {
 		return { objectCount: countListedObjects(response.text) };
 	}
 
+	async listObjects(prefix = "", continuationToken?: string): Promise<R2ListResult> {
+		const query: Record<string, string> = { "list-type": "2", prefix };
+		if (continuationToken) query["continuation-token"] = continuationToken;
+		const response = await this.signedRequest({ method: "GET", key: "", query });
+		assertSuccess("LIST", response);
+		return parseListObjects(response.text);
+	}
+
 	async getObject(key: string): Promise<R2GetResult> {
 		const response = await this.signedRequest({ method: "GET", key });
 		if (response.status === 404) throw new R2NotFoundError(key);
@@ -97,6 +118,15 @@ export class R2Client {
 		if (response.status === 412) throw new R2PreconditionFailedError();
 		assertSuccess(`PUT ${key}`, response);
 		return { etag: normalizeEtag(getHeader(response.headers, "etag")) };
+	}
+
+	async deleteObject(key: string, ifMatch?: string): Promise<void> {
+		const headers: Record<string, string> = {};
+		if (ifMatch) headers["if-match"] = ifMatch;
+		const response = await this.signedRequest({ method: "DELETE", key, headers });
+		if (response.status === 404) return;
+		if (response.status === 412) throw new R2PreconditionFailedError();
+		assertSuccess(`DELETE ${key}`, response);
 	}
 
 	private async signedRequest(request: {
@@ -249,6 +279,25 @@ function hex(buffer: ArrayBuffer): string {
 function countListedObjects(xml: string): number {
 	const keyCount = Number(extractXml(xml, "KeyCount"));
 	return Number.isFinite(keyCount) && keyCount >= 0 ? keyCount : (xml.match(/<Contents>/g)?.length ?? 0);
+}
+
+function parseListObjects(xml: string): R2ListResult {
+	const objects = [...xml.matchAll(/<Contents>([\s\S]*?)<\/Contents>/g)].map((match) => {
+		const content = match[1];
+		const key = decodeXml(extractXml(content, "Key"));
+		const size = Number(extractXml(content, "Size"));
+		if (!key || !Number.isSafeInteger(size) || size < 0) throw new Error("R2 returned invalid object metadata.");
+		return {
+			key,
+			etag: normalizeEtag(decodeXml(extractXml(content, "ETag"))),
+			size,
+			lastModified: decodeXml(extractXml(content, "LastModified")),
+		};
+	});
+	const isTruncated = extractXml(xml, "IsTruncated").trim().toLowerCase() === "true";
+	const nextContinuationToken = decodeXml(extractXml(xml, "NextContinuationToken")) || undefined;
+	if (isTruncated && !nextContinuationToken) throw new Error("R2 truncated an object listing without a continuation token.");
+	return { objects, isTruncated, nextContinuationToken };
 }
 
 function assertSuccess(operation: string, response: R2TransportResponse): void {

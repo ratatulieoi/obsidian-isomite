@@ -21,5 +21,10 @@
     "obsidian": "latest",
     "typescript": "^5.8.0",
     "vitest": "^3.0.0"
+  },
+  "dependencies": {
+    "fflate": "^0.8.2",
+    "minimatch": "^10.2.4",
+    "node-diff3": "^3.2.1"
   }
 }

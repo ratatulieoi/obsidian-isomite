@@ -5,6 +5,8 @@ import {
 	deriveKeys,
 	encryptBytes,
 	encryptContentBlob,
+	decryptSyncBlob,
+	encryptSyncBlob,
 	exportRecoveryKey,
 	generateSaltBase64,
 	hmacObjectKey,
@@ -48,6 +50,18 @@ describe("Isomite encryption", () => {
 			"private note"
 		);
 		await expect(decryptContentBlob(keys.contentKey, encrypted, "other/note.md")).rejects.toThrow();
+	});
+
+	it("binds immutable sync blobs to content hashes rather than paths", async () => {
+		const keys = await deriveKeys("passphrase", generateSaltBase64());
+		const plaintext = new TextEncoder().encode("movable attachment");
+		const contentHash = await keyedContentHash(keys.contentHashKey, plaintext);
+		const encrypted = await encryptSyncBlob(keys.contentKey, plaintext, contentHash);
+
+		expect(new TextDecoder().decode(await decryptSyncBlob(keys.contentKey, encrypted, contentHash))).toBe(
+			"movable attachment"
+		);
+		await expect(decryptSyncBlob(keys.contentKey, encrypted, "ab".repeat(32))).rejects.toThrow();
 	});
 
 	it("exports and imports all recovery key material", async () => {

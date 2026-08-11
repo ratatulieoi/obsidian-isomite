@@ -59,6 +59,31 @@ describe("R2Client", () => {
 		expect(called).toBe(false);
 	});
 
+	it("lists object metadata and continuation state", async () => {
+		const transport: R2Transport = async () =>
+			response(
+				200,
+				"<ListBucketResult><IsTruncated>true</IsTruncated><NextContinuationToken>next&amp;token</NextContinuationToken>" +
+					'<Contents><Key>_isomite%2Fignored</Key><LastModified>2026-08-01T00:00:00.000Z</LastModified><ETag>"etag-1"</ETag><Size>42</Size></Contents>' +
+					"</ListBucketResult>"
+			);
+
+		const result = await new R2Client(credentials, transport).listObjects("_isomite/");
+
+		expect(result).toEqual({
+			objects: [
+				{
+					key: "_isomite%2Fignored",
+					etag: "etag-1",
+					size: 42,
+					lastModified: "2026-08-01T00:00:00.000Z",
+				},
+			],
+			isTruncated: true,
+			nextContinuationToken: "next&token",
+		});
+	});
+
 	it("signs conditional object writes and returns a normalized ETag", async () => {
 		let capturedInit: Parameters<R2Transport>[1] | undefined;
 		const transport: R2Transport = async (_url, init) => {
@@ -77,5 +102,18 @@ describe("R2Client", () => {
 		expect(capturedInit?.headers.authorization).toContain(
 			"SignedHeaders=content-type;host;if-none-match;x-amz-content-sha256;x-amz-date"
 		);
+	});
+
+	it("signs conditional deletes", async () => {
+		let capturedInit: Parameters<R2Transport>[1] | undefined;
+		const transport: R2Transport = async (_url, init) => {
+			capturedInit = init;
+			return response(204);
+		};
+
+		await new R2Client(credentials, transport).deleteObject("_isomite/old", "etag-1");
+
+		expect(capturedInit?.method).toBe("DELETE");
+		expect(capturedInit?.headers["if-match"]).toBe("etag-1");
 	});
 });

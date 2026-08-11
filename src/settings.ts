@@ -1,6 +1,7 @@
 import { App, Notice, PluginSettingTab, Setting } from "obsidian";
 import type IsomitePlugin from "../main";
 import { parseR2Endpoint } from "./r2/endpoint";
+import { validateIgnorePatterns } from "./sync/ignore";
 
 export interface IsomiteSettings {
 	endpoint: string;
@@ -9,6 +10,14 @@ export interface IsomiteSettings {
 	secretAccessKey: string;
 	passphrase: string;
 	importedRecoveryKey: string;
+	deviceId: string;
+	vaultId: string;
+	encryptedSyncBaseline: string;
+	encryptedSyncJournal: string;
+	customIgnorePatterns: string[];
+	ignorePatternsDirty: boolean;
+	syncOnStartup: boolean;
+	syncOnSave: boolean;
 }
 
 export const DEFAULT_SETTINGS: IsomiteSettings = {
@@ -18,6 +27,14 @@ export const DEFAULT_SETTINGS: IsomiteSettings = {
 	secretAccessKey: "",
 	passphrase: "",
 	importedRecoveryKey: "",
+	deviceId: "",
+	vaultId: "",
+	encryptedSyncBaseline: "",
+	encryptedSyncJournal: "",
+	customIgnorePatterns: [],
+	ignorePatternsDirty: false,
+	syncOnStartup: false,
+	syncOnSave: false,
 };
 
 export class IsomiteSettingTab extends PluginSettingTab {
@@ -164,6 +181,96 @@ export class IsomiteSettingTab extends PluginSettingTab {
 					} catch (error) {
 						new Notice(`Recovery-key export failed: ${errorMessage(error)}`);
 					}
+				});
+			});
+
+		new Setting(containerEl).setName("Synchronization").setHeading();
+		containerEl.createEl("p", {
+			text: "Every scan opens a complete review before Apply. Isomite never applies startup or save-triggered changes automatically.",
+		});
+
+		if (this.plugin.settings.vaultId) {
+			new Setting(containerEl)
+				.setName("Pair another device")
+				.setDesc("Copy a pairing code containing this vault's identity and R2 location. It does not contain credentials or encryption keys.")
+				.addButton((button) => {
+					button.setButtonText("Copy pairing code");
+					button.onClick(async () => {
+						try {
+							await this.plugin.copyPairingCode();
+							new Notice("Pairing code copied.");
+						} catch (error) {
+							new Notice(`Pairing-code export failed: ${errorMessage(error)}`);
+						}
+					});
+				});
+		} else {
+			let pairingCode = "";
+			new Setting(containerEl)
+				.setName("Pair this device")
+				.setDesc("Paste a pairing code from the device that initialized this vault. R2 credentials and passphrase are still entered separately.")
+				.addText((text) => {
+					text.setPlaceholder("Isomite pairing code");
+					text.onChange((value) => (pairingCode = value.trim()));
+				})
+				.addButton((button) => {
+					button.setButtonText("Import pairing code");
+					button.onClick(async () => {
+						try {
+							await this.plugin.importPairingCode(pairingCode);
+							new Notice("Pairing code imported. Enter this device's R2 credentials and encryption passphrase.");
+							this.display();
+						} catch (error) {
+							new Notice(`Pairing-code import failed: ${errorMessage(error)}`);
+						}
+					});
+				});
+		}
+
+		new Setting(containerEl)
+			.setName("Review changes now")
+			.setDesc("Scan local and R2 state, then show every proposed change before anything is applied.")
+			.addButton((button) => {
+				button.setButtonText("Review sync").setCta();
+				button.onClick(() => void this.plugin.reviewAndSync());
+			});
+
+		new Setting(containerEl)
+			.setName("Global ignore patterns")
+			.setDesc("One glob per line. These encrypted rules apply to every paired device after the reviewed sync is approved.")
+			.addTextArea((text) => {
+				text.setPlaceholder("Private/**\nArchive/*.zip");
+				text.setValue(this.plugin.settings.customIgnorePatterns.join("\n"));
+				text.onChange(async (value) => {
+					try {
+						this.plugin.settings.customIgnorePatterns = validateIgnorePatterns(value.split("\n"));
+						this.plugin.settings.ignorePatternsDirty = true;
+						await this.plugin.saveSettings();
+					} catch (error) {
+						new Notice(`Ignore pattern not saved: ${errorMessage(error)}`);
+					}
+				});
+			});
+
+		new Setting(containerEl)
+			.setName("Sync on startup")
+			.setDesc("Prepare a review after Obsidian starts. Changes are never applied automatically.")
+			.addToggle((toggle) => {
+				toggle.setValue(this.plugin.settings.syncOnStartup);
+				toggle.onChange(async (value) => {
+					this.plugin.settings.syncOnStartup = value;
+					await this.plugin.saveSettings();
+				});
+			});
+
+		new Setting(containerEl)
+			.setName("Sync after saves")
+			.setDesc("Prepare one quiet review after 30 seconds without vault changes. Changes are never applied automatically.")
+			.addToggle((toggle) => {
+				toggle.setValue(this.plugin.settings.syncOnSave);
+				toggle.onChange(async (value) => {
+					this.plugin.settings.syncOnSave = value;
+					await this.plugin.saveSettings();
 				});
 			});
 

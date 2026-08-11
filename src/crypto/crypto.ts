@@ -5,6 +5,7 @@ const AES_KEY_LENGTH = 256;
 const GCM_NONCE_BYTES = 12;
 const SALT_BYTES = 16;
 const CONTENT_BLOB_VERSION = 0x01;
+const SYNC_BLOB_VERSION = 0x01;
 
 export interface DerivedKeys {
 	contentKey: CryptoKey;
@@ -90,6 +91,25 @@ export async function decryptContentBlob(key: CryptoKey, blob: Uint8Array, path:
 	return decryptBytes(key, blob.slice(1), aad);
 }
 
+/**
+ * Encrypts an immutable sync blob and binds it to its keyed plaintext hash.
+ * Paths live in the authenticated encrypted revision instead of the blob, so
+ * renames can reuse the same encrypted object without uploading its bytes.
+ */
+export async function encryptSyncBlob(key: CryptoKey, plaintext: Uint8Array, contentHash: string): Promise<Uint8Array> {
+	const aad = syncBlobAdditionalData(contentHash);
+	const encrypted = await encryptBytes(key, plaintext, aad);
+	const blob = new Uint8Array(encrypted.byteLength + 1);
+	blob[0] = SYNC_BLOB_VERSION;
+	blob.set(encrypted, 1);
+	return blob;
+}
+
+export async function decryptSyncBlob(key: CryptoKey, blob: Uint8Array, contentHash: string): Promise<Uint8Array> {
+	if (blob[0] !== SYNC_BLOB_VERSION) throw new Error("Unsupported Isomite sync-blob version.");
+	return decryptBytes(key, blob.slice(1), syncBlobAdditionalData(contentHash));
+}
+
 export async function encryptString(key: CryptoKey, text: string): Promise<string> {
 	return toBase64(await encryptBytes(key, new TextEncoder().encode(text)));
 }
@@ -161,6 +181,11 @@ export async function importRecoveryKey(value: string): Promise<DerivedKeys> {
 
 function normalizePath(path: string): string {
 	return path.replace(/\\/g, "/").normalize("NFC");
+}
+
+function syncBlobAdditionalData(contentHash: string): Uint8Array {
+	if (!/^[0-9a-f]{64}$/i.test(contentHash)) throw new Error("The sync-blob content hash is invalid.");
+	return new TextEncoder().encode(`isomite-sync-blob-v1:${contentHash.toLowerCase()}`);
 }
 
 async function deriveAesKey(baseKey: CryptoKey, salt: Uint8Array): Promise<CryptoKey> {

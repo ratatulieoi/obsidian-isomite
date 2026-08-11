@@ -54,6 +54,11 @@ async function getOrCreateEncryptionMeta(client: R2Client): Promise<{ value: Enc
 	const existing = await readEncryptionMeta(client);
 	if (existing) return existing;
 
+	const listing = await client.listObjects();
+	if (listing.objects.length > 0) {
+		throw new Error("Isomite encryption can only be initialized in a dedicated empty bucket.");
+	}
+
 	const value: EncryptionMeta = {
 		format: FORMAT,
 		saltBase64: generateSaltBase64(),

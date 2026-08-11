@@ -18,6 +18,12 @@ class MemoryR2 {
 		const existing = this.objects.get(key);
 
 		if (init.method === "GET") {
+			if (new URL(url).searchParams.get("list-type") === "2") {
+				const contents = [...this.objects.entries()].map(([objectKey, object]) =>
+					`<Contents><Key>${objectKey}</Key><LastModified>2026-08-01T00:00:00.000Z</LastModified><ETag>\"${object.etag}\"</ETag><Size>${object.body.byteLength}</Size></Contents>`
+				).join("");
+				return makeResponse(200, `<ListBucketResult><IsTruncated>false</IsTruncated>${contents}</ListBucketResult>`);
+			}
 			if (!existing) return makeResponse(404, "<Error><Code>NoSuchKey</Code></Error>");
 			return makeResponse(200, new TextDecoder().decode(existing.body), { etag: `"${existing.etag}"` });
 		}
@@ -46,6 +52,15 @@ describe("bucket encryption metadata", () => {
 		await initializeOrVerifyEncryption(client, "correct passphrase");
 		await expect(initializeOrVerifyEncryption(client, "correct passphrase")).resolves.toBeDefined();
 		expect(bucket.keys()).toEqual(["_isomite/encryption-v1.json"]);
+	});
+
+	it("refuses to initialize encryption in a non-empty bucket", async () => {
+		const bucket = new MemoryR2();
+		const client = new R2Client(credentials, bucket.transport);
+		await client.putObject("unrelated.txt", new TextEncoder().encode("data"));
+
+		await expect(initializeOrVerifyEncryption(client, "correct passphrase")).rejects.toThrow("dedicated empty bucket");
+		expect(bucket.keys()).toEqual(["unrelated.txt"]);
 	});
 
 	it("rejects the wrong passphrase without creating another object", async () => {
