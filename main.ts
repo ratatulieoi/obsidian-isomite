@@ -76,29 +76,62 @@ export default class IsomitePlugin extends Plugin {
 		await navigator.clipboard.writeText(await exportRecoveryKey(this.cachedEncryptionKeys));
 	}
 
-	async copyPairingCode(): Promise<void> {
+	async copyPairingCode(pairingPassword: string): Promise<void> {
 		if (!this.settings.vaultId || !this.settings.encryptedSyncBaseline) {
 			throw new Error("Complete the first sync before pairing another device.");
 		}
-		await navigator.clipboard.writeText(
-			createPairingCode({
+		if (!this.settings.accessKeyId || !this.settings.secretAccessKey) {
+			throw new Error("R2 credentials are incomplete.");
+		}
+		await this.initializeOrVerifyEncryption();
+		const encryption = this.settings.importedRecoveryKey
+			? { type: "recoveryKey" as const, value: this.settings.importedRecoveryKey }
+			: { type: "passphrase" as const, value: this.settings.passphrase };
+		const pairingCode = await createPairingCode(
+			{
 				vaultId: this.settings.vaultId,
 				endpoint: this.settings.endpoint,
 				bucket: this.settings.bucket,
-			})
+				accessKeyId: this.settings.accessKeyId,
+				secretAccessKey: this.settings.secretAccessKey,
+				encryption,
+			},
+			pairingPassword
 		);
+		await navigator.clipboard.writeText(pairingCode);
 	}
 
-	async importPairingCode(value: string): Promise<void> {
+	async importPairingCode(value: string, pairingPassword: string): Promise<void> {
 		if (this.settings.encryptedSyncBaseline || this.settings.encryptedSyncJournal) {
-			throw new Error("Reset this device's existing sync state before importing another pairing code.");
+			throw new Error("This device already has sync state and cannot import a pairing bundle.");
 		}
-		const pairing = parsePairingCode(value);
+		const pairing = await parsePairingCode(value, pairingPassword);
+		const previous = { ...this.settings };
 		this.settings.endpoint = pairing.endpoint;
 		this.settings.bucket = pairing.bucket;
+		this.settings.accessKeyId = pairing.accessKeyId;
+		this.settings.secretAccessKey = pairing.secretAccessKey;
 		this.settings.vaultId = pairing.vaultId;
+		this.settings.passphrase = pairing.encryption.type === "passphrase" ? pairing.encryption.value : "";
+		this.settings.importedRecoveryKey = pairing.encryption.type === "recoveryKey" ? pairing.encryption.value : "";
 		this.clearCachedEncryptionKeys();
-		await this.saveSettings();
+		try {
+			const connection = await this.testR2Connection();
+			if (connection.objectCount === 0) throw new Error("The pairing bucket is empty.");
+			await this.initializeOrVerifyEncryption();
+			const keys = this.cachedEncryptionKeys;
+			if (!keys) throw new Error("Encryption keys are not available.");
+			const remoteHead = await new RevisionStore(this.createR2Client(), keys).readHead();
+			if (!remoteHead || remoteHead.head.vaultId !== pairing.vaultId) {
+				throw new Error("The pairing bundle does not match the Isomite vault in R2.");
+			}
+			this.settings.setupMode = "initialize";
+			await this.saveSettings();
+		} catch (error) {
+			this.settings = previous;
+			this.clearCachedEncryptionKeys();
+			throw error;
+		}
 	}
 
 	async importAndVerifyRecoveryKey(value: string): Promise<void> {
@@ -115,6 +148,10 @@ export default class IsomitePlugin extends Plugin {
 	}
 
 	async reviewAndSync(automatic = false): Promise<void> {
+		if (this.settings.setupMode === "pair") {
+			if (!automatic) new Notice("Import an encrypted pairing bundle before reviewing sync.");
+			return;
+		}
 		if (this.syncBusy) {
 			if (!automatic || !this.syncRescanQueued) this.syncRescanQueued = automatic ? "automatic" : "manual";
 			return;
@@ -152,16 +189,16 @@ export default class IsomitePlugin extends Plugin {
 				: undefined;
 			const remoteHead = await store.readHead();
 			let adoptEstablishedRemote = false;
-			let adoptLocalOverRemote = false;
+			const adoptLocalOverRemote = false;
 			if (remoteHead && !baseline) {
 				if (this.settings.vaultId === remoteHead.head.vaultId) {
 					adoptEstablishedRemote = true;
 				} else {
-					throw new Error("Pair this device with the bucket before its first sync.");
+					throw new Error("Choose “Pair to existing Isomite vault” and import its encrypted pairing bundle.");
 				}
 			}
-			if (!remoteHead && !this.settings.vaultId) {
-				this.settings.vaultId = `vault-${crypto.randomUUID()}`;
+			if (!remoteHead) {
+				if (!baseline) this.settings.vaultId = `vault-${crypto.randomUUID()}`;
 				await this.saveSettings();
 			}
 			const requestedIgnorePatterns = this.settings.ignorePatternsDirty
@@ -267,6 +304,7 @@ export default class IsomitePlugin extends Plugin {
 		this.settings = { ...DEFAULT_SETTINGS, ...(saved ?? {}) };
 		if (!Array.isArray(this.settings.customIgnorePatterns)) this.settings.customIgnorePatterns = [];
 		if (typeof this.settings.ignorePatternsDirty !== "boolean") this.settings.ignorePatternsDirty = false;
+		if (this.settings.setupMode !== "initialize" && this.settings.setupMode !== "pair") this.settings.setupMode = "initialize";
 		let changed = false;
 		if (!this.settings.deviceId) {
 			this.settings.deviceId = `device-${crypto.randomUUID()}`;

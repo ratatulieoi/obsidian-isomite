@@ -3,7 +3,10 @@ import type IsomitePlugin from "../main";
 import { parseR2Endpoint } from "./r2/endpoint";
 import { validateIgnorePatterns } from "./sync/ignore";
 
+export type SetupMode = "initialize" | "pair";
+
 export interface IsomiteSettings {
+	setupMode: SetupMode;
 	endpoint: string;
 	bucket: string;
 	accessKeyId: string;
@@ -21,6 +24,7 @@ export interface IsomiteSettings {
 }
 
 export const DEFAULT_SETTINGS: IsomiteSettings = {
+	setupMode: "initialize",
 	endpoint: "",
 	bucket: "",
 	accessKeyId: "",
@@ -46,10 +50,80 @@ export class IsomiteSettingTab extends PluginSettingTab {
 	}
 
 	getSettingDefinitions(): SettingDefinitionItem[] {
+		let pairingCode = "";
+		let pairingPassword = "";
 		return [
 			{
 				type: "group",
+				heading: "Setup",
+				items: [
+					{
+						name: "This device",
+						desc: "Set up a bucket directly, or import an encrypted pairing bundle from another Isomite device.",
+						control: {
+							type: "dropdown",
+							key: "setupMode",
+							options: {
+								initialize: "Initialize or connect to bucket",
+								pair: "Pair to existing Isomite vault",
+							},
+						},
+					},
+				],
+			},
+			{
+				type: "group",
+				heading: "Pair to existing Isomite vault",
+				visible: () => this.plugin.settings.setupMode === "pair",
+				items: [
+					{
+						name: "Encrypted pairing bundle",
+						desc: "Paste the bundle copied from a connected Isomite device. It carries the R2 destination, credentials, and encryption access inside one encrypted code.",
+						render: (setting) => {
+							setting.addTextArea((text) => {
+								text.setPlaceholder("Paste encrypted pairing bundle");
+								text.onChange((value) => (pairingCode = value.trim()));
+							});
+						},
+					},
+					{
+						name: "One-time pairing password",
+						desc: "Enter the 16-character-or-longer password supplied separately by the connected device.",
+						render: (setting) => {
+							setting.addText((text) => {
+								text.inputEl.type = "password";
+								text.setPlaceholder("One-time pairing password");
+								text.onChange((value) => (pairingPassword = value));
+							});
+						},
+					},
+					{
+						name: "Import pairing bundle",
+						desc: "Decrypt the bundle, verify its R2 vault identity, and configure this device.",
+						render: (setting) => {
+							setting.addButton((button) => {
+								button.setButtonText("Import and connect").setCta();
+								button.onClick(async () => {
+									button.setDisabled(true).setButtonText("Importing…");
+									try {
+										await this.plugin.importPairingCode(pairingCode, pairingPassword);
+										new Notice("Pairing bundle imported and verified. Review sync to download the vault.");
+										this.update();
+									} catch (error) {
+										new Notice(`Pairing import failed: ${errorText(error)}`);
+									} finally {
+										button.setDisabled(false).setButtonText("Import and connect");
+									}
+								});
+							});
+						},
+					},
+				],
+			},
+			{
+				type: "group",
 				heading: "Cloudflare R2",
+				visible: () => this.plugin.settings.setupMode !== "pair",
 				items: [
 					{
 						name: "S3 API endpoint",
@@ -123,6 +197,7 @@ export class IsomiteSettingTab extends PluginSettingTab {
 			{
 				type: "group",
 				heading: "Encryption",
+				visible: () => this.plugin.settings.setupMode !== "pair",
 				items: [
 					{
 						name: "Encryption passphrase",
@@ -227,47 +302,29 @@ export class IsomiteSettingTab extends PluginSettingTab {
 			{
 				type: "group",
 				heading: "Synchronization",
+				visible: () => this.plugin.settings.setupMode !== "pair",
 				items: [
 					{
 						name: "Pair another device",
-						desc: "Copy a pairing code containing this vault's identity and R2 location, but no credentials or encryption keys.",
+						desc: "Create an encrypted bundle containing the R2 destination, credentials, and encryption access. Send its one-time password separately.",
 						aliases: ["pairing code", "new device"],
 						visible: () => Boolean(this.plugin.settings.vaultId && this.plugin.settings.encryptedSyncBaseline),
 						render: (setting) => {
-							setting.addButton((button) => {
-								button.setButtonText("Copy pairing code");
-								button.onClick(async () => {
-									try {
-										await this.plugin.copyPairingCode();
-										new Notice("Pairing code copied.");
-									} catch (error) {
-										new Notice(`Pairing-code export failed: ${errorText(error)}`);
-									}
-								});
-							});
-						},
-					},
-					{
-						name: "Pair this device",
-						desc: "Paste a pairing code from the device that initialized this vault. Credentials and passphrase are entered separately.",
-						aliases: ["pairing code", "join vault"],
-						visible: () => !(this.plugin.settings.vaultId && this.plugin.settings.encryptedSyncBaseline),
-						render: (setting) => {
-							let pairingCode = "";
+							let pairingPassword = "";
 							setting
 								.addText((text) => {
-									text.setPlaceholder("Isomite pairing code");
-									text.onChange((value) => (pairingCode = value.trim()));
+									text.inputEl.type = "password";
+									text.setPlaceholder("One-time password, 16+ characters");
+									text.onChange((value) => (pairingPassword = value));
 								})
 								.addButton((button) => {
-									button.setButtonText("Import pairing code");
+									button.setButtonText("Copy encrypted bundle");
 									button.onClick(async () => {
 										try {
-											await this.plugin.importPairingCode(pairingCode);
-											new Notice("Pairing code imported. Enter this device's R2 credentials and encryption passphrase.");
-											this.update();
+											await this.plugin.copyPairingCode(pairingPassword);
+											new Notice("Encrypted pairing bundle copied. Send the one-time password separately.");
 										} catch (error) {
-											new Notice(`Pairing-code import failed: ${errorText(error)}`);
+											new Notice(`Pairing export failed: ${errorText(error)}`);
 										}
 									});
 								});
@@ -321,6 +378,8 @@ export class IsomiteSettingTab extends PluginSettingTab {
 
 	getControlValue(key: string): unknown {
 		switch (key) {
+			case "setupMode":
+				return this.plugin.settings.setupMode;
 			case "bucket":
 				return this.plugin.settings.bucket;
 			case "accessKeyId":
@@ -338,6 +397,12 @@ export class IsomiteSettingTab extends PluginSettingTab {
 
 	async setControlValue(key: string, value: unknown): Promise<void> {
 		switch (key) {
+			case "setupMode":
+				if (value !== "initialize" && value !== "pair") return;
+				this.plugin.settings.setupMode = value;
+				await this.plugin.saveSettings();
+				this.update();
+				return;
 			case "bucket":
 				this.plugin.settings.bucket = String(value).trim();
 				break;

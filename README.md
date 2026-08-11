@@ -20,7 +20,7 @@ Isomite is an Obsidian plugin for controlled vault synchronization through a pri
 - Review every proposed change before applying the complete plan.
 - Store encrypted immutable revisions and deduplicated encrypted file blobs.
 - Preserve deletion history and recover interrupted local application with an encrypted journal.
-- Pair additional devices without putting credentials or encryption keys in the pairing code.
+- Pair additional devices with one encrypted bundle containing the R2 connection and encryption access, protected by a separate one-time password.
 
 ## Install
 
@@ -46,22 +46,33 @@ After Isomite is accepted into the Obsidian Community Plugins directory:
 3. Copy both files into that directory.
 4. Reload Obsidian and enable **Isomite** under Community Plugins.
 
-## Connect Cloudflare R2
+## Set up the first device
 
-1. Create a dedicated private R2 bucket for the vault.
-2. Create an R2 API token scoped to that bucket with **Object Read & Write** permission.
-3. Copy the token's **Access Key ID** and **Secret Access Key** when Cloudflare displays them.
-4. In Obsidian, open **Settings → Isomite** and enter:
+1. Open **Settings → Isomite** and choose **Initialize or connect to bucket**.
+2. Create a dedicated private R2 bucket for the vault.
+3. Create an R2 API token scoped to that bucket with **Object Read & Write** permission.
+4. Copy the token's **Access Key ID** and **Secret Access Key** when Cloudflare displays them.
+5. Enter:
    - **S3 API endpoint:** `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`
    - **Bucket:** the dedicated bucket name
    - **Access key ID**
    - **Secret access key**
-5. Select **Test connection**.
-6. Enter a long, unique encryption passphrase.
-7. Select **Verify encryption** to initialize or verify this bucket's Isomite encryption metadata.
-8. Export the recovery key and store it in a password manager outside the vault.
+6. Select **Test connection**.
+7. Enter a long, unique encryption passphrase.
+8. Select **Verify encryption** to initialize or verify this bucket's Isomite encryption metadata.
+9. Select **Review sync**, approve the first upload, then export the recovery key and store it in a password manager outside the vault.
 
 A bucket URL ending in `/<bucket>` is also accepted. Isomite immediately separates the endpoint and fills the **R2 bucket name** field.
+
+## Pair another device
+
+1. On a synced device, enter a new one-time password under **Pair another device** and copy the encrypted bundle.
+2. Send the bundle and its one-time password through separate channels.
+3. On the new device, choose **Pair to existing Isomite vault** at the top of Isomite settings. The other settings collapse.
+4. Paste the bundle and one-time password, then select **Import and connect**.
+5. Select **Review sync** and approve the download.
+
+The bundle contains R2 credentials and encryption access, but those values are encrypted with AES-256-GCM and a key derived from the one-time password. Anyone who obtains both can access the R2 vault, so treat them as secrets and use a fresh password for every device.
 
 ## Network use and privacy
 
