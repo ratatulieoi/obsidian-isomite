@@ -77,7 +77,9 @@ export default class IsomitePlugin extends Plugin {
 	}
 
 	async copyPairingCode(): Promise<void> {
-		if (!this.settings.vaultId) throw new Error("Complete the first sync before pairing another device.");
+		if (!this.settings.vaultId || !this.settings.encryptedSyncBaseline) {
+			throw new Error("Complete the first sync before pairing another device.");
+		}
 		await navigator.clipboard.writeText(
 			createPairingCode({
 				vaultId: this.settings.vaultId,

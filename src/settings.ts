@@ -189,7 +189,7 @@ export class IsomiteSettingTab extends PluginSettingTab {
 			text: "Every scan opens a complete review before Apply. Isomite never applies startup or save-triggered changes automatically.",
 		});
 
-		if (this.plugin.settings.vaultId) {
+		if (this.plugin.settings.vaultId && this.plugin.settings.encryptedSyncBaseline) {
 			new Setting(containerEl)
 				.setName("Pair another device")
 				.setDesc("Copy a pairing code containing this vault's identity and R2 location. It does not contain credentials or encryption keys.")
