@@ -26,18 +26,9 @@ Isomite is an Obsidian plugin for controlled vault synchronization through a pri
 
 ### Community Plugins
 
-After Isomite is accepted into the Obsidian Community Plugins directory:
-
 1. Open **Settings → Community plugins** in Obsidian.
 2. Select **Browse** and search for **Isomite**.
 3. Install and enable the plugin.
-
-### Install the beta now with BRAT
-
-1. Install [BRAT](https://obsidian.md/plugins?id=obsidian42-brat) from Community Plugins.
-2. Open **Settings → BRAT → Add beta plugin**.
-3. Enter `https://github.com/ratatulieoi/obsidian-isomite`.
-4. Enable **Isomite** under Community Plugins.
 
 ### Manual installation
 
