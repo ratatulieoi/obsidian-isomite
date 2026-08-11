@@ -36,7 +36,7 @@ export class SyncReviewModal extends Modal {
 
 		const summary = summarize(changed);
 		this.contentEl.createEl("p", { text: summary });
-		const list = this.contentEl.createEl("div", { cls: "isomite-sync-review-list" });
+		const list = this.contentEl.createDiv({ cls: "isomite-sync-review-list" });
 		for (const entry of changed) this.renderEntry(list, entry);
 
 		const controls = new Setting(this.contentEl);

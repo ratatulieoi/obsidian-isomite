@@ -15,7 +15,7 @@ export interface SyncVaultAdapter {
 	stat(path: string): Promise<VaultFileMeta | undefined>;
 }
 
-/** Includes .obsidian config/plugins by scanning the adapter, not Vault#getFiles. */
+/** Includes the configured Obsidian config folder by scanning the adapter, not Vault#getFiles. */
 export class ObsidianSyncVaultAdapter implements SyncVaultAdapter {
 	constructor(private readonly app: App) {}
 
@@ -53,13 +53,13 @@ export class ObsidianSyncVaultAdapter implements SyncVaultAdapter {
 		const listing = await this.app.vault.adapter.list(folder);
 		for (const file of listing.files) {
 			const path = normalizeSyncPath(file);
-			if (isIgnoredPath(path, ignores)) continue;
+			if (isIgnoredPath(path, ignores, this.app.vault.configDir)) continue;
 			const stat = await this.app.vault.adapter.stat(path);
 			if (stat?.type === "file") output.push({ path, size: stat.size, mtime: stat.mtime });
 		}
 		for (const child of listing.folders) {
 			const path = normalizeSyncPath(child);
-			if (isIgnoredPath(`${path}/placeholder`, ignores)) continue;
+			if (isIgnoredPath(`${path}/placeholder`, ignores, this.app.vault.configDir)) continue;
 			await this.walk(path, ignores, output);
 		}
 	}

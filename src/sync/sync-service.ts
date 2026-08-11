@@ -24,6 +24,7 @@ export interface CreatePlanInput {
 	adoptEstablishedRemote?: boolean;
 	adoptLocalOverRemote?: boolean;
 	requestedIgnorePatterns?: string[];
+	configDir: string;
 	readBase?: (path: string, contentHash: string) => Promise<Uint8Array | undefined>;
 }
 
@@ -41,7 +42,7 @@ export async function createSyncPlan(input: CreatePlanInput): Promise<PlannedSyn
 	const ignorePatterns = input.requestedIgnorePatterns ?? remoteIgnorePatterns;
 	const localFiles = await scanLocalFiles(input.vault, input.keys, input.baseline, ignorePatterns);
 	const ignoredRemotePaths = (remoteRevision?.files ?? [])
-		.filter((file) => isIgnoredPath(file.path, ignorePatterns))
+		.filter((file) => isIgnoredPath(file.path, ignorePatterns, input.configDir))
 		.map((file) => file.path);
 	let plan = buildSyncPlan({
 		baseline: input.baseline,

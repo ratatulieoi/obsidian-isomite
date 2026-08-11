@@ -83,6 +83,7 @@ The encryption metadata object contains a random salt and encrypted key verifier
 
 ```bash
 npm install
+npm run lint
 npm test
 npm run build
 ```

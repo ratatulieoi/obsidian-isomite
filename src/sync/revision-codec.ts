@@ -102,12 +102,13 @@ function assertHead(value: unknown): asserts value is RemoteHead {
 		value.history = [{ revisionId: value.revisionId, generation: value.generation, createdAt: new Date(0).toISOString() }];
 	}
 	if (!Array.isArray(value.history)) throw new Error("The encrypted remote head history is invalid.");
-	for (const entry of value.history) {
+	for (const entry of value.history as unknown[]) {
 		if (!isRecord(entry) || !isIdentifier(entry.revisionId) || !isGeneration(entry.generation) || !isIsoDate(entry.createdAt)) {
 			throw new Error("The encrypted remote head history is invalid.");
 		}
 	}
-	if (!value.history.length || value.history[0].revisionId !== value.revisionId || value.history[0].generation !== value.generation) {
+	const firstHistoryEntry: unknown = value.history[0];
+	if (!isRecord(firstHistoryEntry) || firstHistoryEntry.revisionId !== value.revisionId || firstHistoryEntry.generation !== value.generation) {
 		throw new Error("The encrypted remote head history does not contain its current revision.");
 	}
 }

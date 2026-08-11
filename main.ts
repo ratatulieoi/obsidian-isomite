@@ -176,6 +176,7 @@ export default class IsomitePlugin extends Plugin {
 				adoptEstablishedRemote,
 				adoptLocalOverRemote,
 				requestedIgnorePatterns,
+				configDir: this.app.vault.configDir,
 				readBase: async (_path, contentHash) => store.getBlob(contentHash),
 			});
 			const changes = planned.plan.entries.filter((entry) => entry.action !== "noop");
@@ -219,7 +220,7 @@ export default class IsomitePlugin extends Plugin {
 			const changeCount = changes.length + (ignoreRulesChanged ? 1 : 0);
 			new Notice(`Isomite applied ${changeCount} reviewed change${changeCount === 1 ? "" : "s"}.`);
 		} catch (error) {
-			new Notice(`Isomite sync stopped: ${error instanceof Error ? error.message : String(error)}`, 10_000);
+			new Notice(`Isomite sync stopped: ${String(error)}`, 10_000);
 		} finally {
 			this.syncBusy = false;
 			if (this.syncRescanQueued) {

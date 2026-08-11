@@ -2,7 +2,7 @@ import { DerivedKeys } from "../crypto/crypto";
 import { remoteBlobObjectKey, remoteBlobPrefix, remoteRevisionObjectKey, remoteRevisionPrefix } from "./revision-codec";
 import { RevisionStore } from "./revision-store";
 import { RemoteHead, RemoteRevision } from "./types";
-import { HISTORY_GC_GRACE_DAYS, retainedRevisionIds } from "./retention";
+import { HISTORY_GC_GRACE_DAYS } from "./retention";
 
 export async function readRevisionHistory(store: RevisionStore, headRevisionId: string): Promise<RemoteRevision[]> {
 	const history: RemoteRevision[] = [];

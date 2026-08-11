@@ -1,16 +1,14 @@
-import { minimatch } from "minimatch";
+import { escape, minimatch } from "minimatch";
 
-export const DEFAULT_IGNORE_PATTERNS = [
+const FIXED_IGNORE_PATTERNS = [
 	".git/**",
 	".trash/**",
-	".obsidian/workspace*.json",
-	".obsidian/plugins/isomite/**",
 	".isomite-backups/**",
 ] as const;
 
-export function isIgnoredPath(path: string, customPatterns: string[] = []): boolean {
+export function isIgnoredPath(path: string, customPatterns: string[], configDir: string): boolean {
 	const normalized = normalizePath(path);
-	return [...DEFAULT_IGNORE_PATTERNS, ...customPatterns].some((pattern) =>
+	return [...fixedIgnorePatterns(configDir), ...customPatterns].some((pattern) =>
 		minimatch(normalized, normalizePattern(pattern), { dot: true, nocase: false, nocomment: true })
 	);
 }
@@ -26,6 +24,15 @@ export function validateIgnorePatterns(patterns: string[]): string[] {
 		unique.add(pattern);
 	}
 	return [...unique].sort();
+}
+
+function fixedIgnorePatterns(configDir: string): string[] {
+	const escapedConfigDir = escape(normalizePath(configDir));
+	return [
+		...FIXED_IGNORE_PATTERNS,
+		`${escapedConfigDir}/workspace*.json`,
+		`${escapedConfigDir}/plugins/isomite/**`,
+	];
 }
 
 function normalizePath(path: string): string {

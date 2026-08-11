@@ -1,6 +1,6 @@
 {
   "name": "isomite",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "Connect an Obsidian vault to a private Cloudflare R2 bucket for controlled synchronization.",
   "main": "main.js",
@@ -12,12 +12,16 @@
   "scripts": {
     "dev": "node esbuild.config.mjs",
     "build": "tsc --noEmit --skipLibCheck && node esbuild.config.mjs production",
+    "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "@typescript-eslint/parser": "^8.67.0",
     "esbuild": "^0.25.0",
+    "eslint": "^10.8.1",
+    "eslint-plugin-obsidianmd": "^0.4.1",
     "obsidian": "latest",
     "typescript": "^5.8.0",
     "vitest": "^3.0.0"

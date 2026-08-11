@@ -20,7 +20,7 @@ class MemoryR2 {
 		if (init.method === "GET") {
 			if (new URL(url).searchParams.get("list-type") === "2") {
 				const contents = [...this.objects.entries()].map(([objectKey, object]) =>
-					`<Contents><Key>${objectKey}</Key><LastModified>2026-08-01T00:00:00.000Z</LastModified><ETag>\"${object.etag}\"</ETag><Size>${object.body.byteLength}</Size></Contents>`
+					`<Contents><Key>${objectKey}</Key><LastModified>2026-08-01T00:00:00.000Z</LastModified><ETag>"${object.etag}"</ETag><Size>${object.body.byteLength}</Size></Contents>`
 				).join("");
 				return makeResponse(200, `<ListBucketResult><IsTruncated>false</IsTruncated>${contents}</ListBucketResult>`);
 			}

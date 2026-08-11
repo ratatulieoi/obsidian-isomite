@@ -22,6 +22,7 @@ Requirements:
 git clone https://github.com/ratatulieoi/obsidian-isomite.git
 cd obsidian-isomite
 npm ci
+npm run lint
 npm test
 npm run build
 ```
@@ -35,6 +36,7 @@ The production bundle is written to `main.js`.
 3. Run:
 
    ```bash
+   npm run lint
    npm test
    npm run build
    git diff --check
