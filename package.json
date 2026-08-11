@@ -7,7 +7,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/ratatulieoi/isomite.git"
+    "url": "https://github.com/ratatulieoi/obsidian-isomite.git"
   },
   "scripts": {
     "dev": "node esbuild.config.mjs",

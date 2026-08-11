@@ -27,12 +27,12 @@ After Isomite is accepted into the Obsidian Community Plugins directory:
 
 1. Install [BRAT](https://obsidian.md/plugins?id=obsidian42-brat) from Community Plugins.
 2. Open **Settings → BRAT → Add beta plugin**.
-3. Enter `https://github.com/ratatulieoi/isomite`.
+3. Enter `https://github.com/ratatulieoi/obsidian-isomite`.
 4. Enable **Isomite** under Community Plugins.
 
 ### Manual installation
 
-1. Download `main.js` and `manifest.json` from the matching [GitHub release](https://github.com/ratatulieoi/isomite/releases).
+1. Download `main.js` and `manifest.json` from the matching [GitHub release](https://github.com/ratatulieoi/obsidian-isomite/releases).
 2. Create `<vault>/.obsidian/plugins/isomite/`.
 3. Copy both files into that directory.
 4. Reload Obsidian and enable **Isomite** under Community Plugins.
