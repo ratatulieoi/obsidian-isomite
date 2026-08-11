@@ -87,7 +87,13 @@ npm test
 npm run build
 ```
 
-The production bundle is written to `main.js`.
+The production bundle is written to `main.js`. See [CONTRIBUTING.md](CONTRIBUTING.md) for issue, pull-request, security, and release guidance.
+
+Release assets include GitHub build-provenance attestations. After downloading a release asset, verify it with:
+
+```bash
+gh attestation verify main.js --repo ratatulieoi/obsidian-isomite
+```
 
 ## License
 

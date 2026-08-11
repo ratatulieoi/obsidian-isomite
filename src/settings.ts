@@ -1,4 +1,4 @@
-import { App, Notice, PluginSettingTab, Setting } from "obsidian";
+import { App, Notice, PluginSettingTab, Setting, SettingDefinitionItem } from "obsidian";
 import type IsomitePlugin from "../main";
 import { parseR2Endpoint } from "./r2/endpoint";
 import { validateIgnorePatterns } from "./sync/ignore";
@@ -43,6 +43,316 @@ export class IsomiteSettingTab extends PluginSettingTab {
 		private readonly plugin: IsomitePlugin
 	) {
 		super(app, plugin);
+	}
+
+	/** Searchable settings for Obsidian 1.13+; display() remains the older-app fallback. */
+	getSettingDefinitions(): SettingDefinitionItem[] {
+		return [
+			{
+				type: "group",
+				heading: "Cloudflare R2",
+				items: [
+					{
+						name: "S3 API endpoint",
+						desc: "Use https://<ACCOUNT_ID>.r2.cloudflarestorage.com/<BUCKET>. Including the bucket name fills the bucket field automatically.",
+						aliases: ["Cloudflare R2 URL", "account endpoint"],
+						render: (setting) => {
+							setting.addText((text) => {
+								text.setPlaceholder("https://<ACCOUNT_ID>.r2.cloudflarestorage.com/<BUCKET>");
+								text.setValue(this.plugin.settings.endpoint);
+								text.onChange(async (value) => {
+									const parsed = parseR2Endpoint(value);
+									this.plugin.settings.endpoint = parsed?.endpoint ?? value.trim();
+									if (parsed?.bucket) this.plugin.settings.bucket = parsed.bucket;
+									await this.plugin.saveSettings();
+									if (parsed?.bucket) this.update();
+								});
+							});
+						},
+					},
+					{
+						name: "R2 bucket name",
+						desc: "The exact bucket name shown under Cloudflare R2 → Buckets.",
+						aliases: ["bucket"],
+						control: { type: "text", key: "bucket", placeholder: "my-obsidian-vault" },
+					},
+					{
+						name: "Access key ID",
+						desc: "The Access Key ID from a bucket-scoped R2 API token with Object Read & Write permission.",
+						aliases: ["R2 API token", "credentials"],
+						control: { type: "text", key: "accessKeyId", placeholder: "R2 Access Key ID" },
+					},
+					{
+						name: "Secret access key",
+						desc: "The matching R2 Secret Access Key. Cloudflare shows it only when the token is created.",
+						aliases: ["R2 secret", "credentials"],
+						render: (setting) => {
+							setting.addText((text) => {
+								text.inputEl.type = "password";
+								text.setPlaceholder("R2 Secret Access Key");
+								text.setValue(this.plugin.settings.secretAccessKey);
+								text.onChange(async (value) => {
+									this.plugin.settings.secretAccessKey = value.trim();
+									await this.plugin.saveSettings();
+								});
+							});
+						},
+					},
+					{
+						name: "Test connection",
+						desc: "Send a signed read-only ListObjectsV2 request without uploading, changing, or deleting anything.",
+						aliases: ["R2 connection"],
+						render: (setting) => {
+							setting.addButton((button) => {
+								button.setButtonText("Test connection");
+								button.onClick(async () => {
+									button.setDisabled(true).setButtonText("Testing…");
+									try {
+										const result = await this.plugin.testR2Connection();
+										new Notice(`Connected to R2. Bucket contains ${result.objectCount} object${result.objectCount === 1 ? "" : "s"}.`);
+									} catch (error) {
+										new Notice(`R2 connection failed: ${errorMessage(error)}`);
+									} finally {
+										button.setDisabled(false).setButtonText("Test connection");
+									}
+								});
+							});
+						},
+					},
+				],
+			},
+			{
+				type: "group",
+				heading: "Encryption",
+				items: [
+					{
+						name: "Encryption passphrase",
+						desc: "Stored locally for unattended scans. Use the same long, unique passphrase on every paired device.",
+						aliases: ["password", "encryption key"],
+						render: (setting) => {
+							setting.addText((text) => {
+								text.inputEl.type = "password";
+								text.setPlaceholder("Use a long, unique passphrase");
+								text.setValue(this.plugin.settings.passphrase);
+								text.onChange(async (value) => {
+									this.plugin.settings.passphrase = value;
+									this.plugin.clearCachedEncryptionKeys();
+									await this.plugin.saveSettings();
+								});
+							});
+						},
+					},
+					{
+						name: "Initialize or verify encryption",
+						desc: "Initialize an empty dedicated bucket or verify that this device unlocks its existing Isomite key.",
+						aliases: ["verify passphrase", "initialize bucket"],
+						render: (setting) => {
+							setting.addButton((button) => {
+								button.setButtonText("Verify encryption");
+								button.onClick(async () => {
+									button.setDisabled(true).setButtonText("Verifying…");
+									try {
+										await this.plugin.initializeOrVerifyEncryption();
+										new Notice("Encryption is initialized and the passphrase matches this bucket.");
+									} catch (error) {
+										new Notice(`Encryption verification failed: ${errorMessage(error)}`);
+									} finally {
+										button.setDisabled(false).setButtonText("Verify encryption");
+									}
+								});
+							});
+						},
+					},
+					{
+						name: "Export recovery key",
+						desc: "Copy sensitive recovery key material for storage in a password manager outside this vault.",
+						aliases: ["backup encryption key"],
+						render: (setting) => {
+							setting.addButton((button) => {
+								button.setButtonText("Copy recovery key");
+								button.onClick(async () => {
+									try {
+										await this.plugin.copyRecoveryKey();
+										new Notice("Recovery key copied. Store it safely outside the vault.");
+									} catch (error) {
+										new Notice(`Recovery-key export failed: ${errorMessage(error)}`);
+									}
+								});
+							});
+						},
+					},
+					{
+						name: "Imported recovery key",
+						desc: "Clear the locally stored imported recovery key and return to passphrase-based unlocking.",
+						visible: () => Boolean(this.plugin.settings.importedRecoveryKey),
+						render: (setting) => {
+							setting.addButton((button) => {
+								button.setButtonText("Clear recovery key");
+								button.onClick(async () => {
+									this.plugin.settings.importedRecoveryKey = "";
+									this.plugin.clearCachedEncryptionKeys();
+									await this.plugin.saveSettings();
+									this.update();
+								});
+							});
+						},
+					},
+					{
+						name: "Import recovery key",
+						desc: "Use a previously exported key if the passphrase is unavailable.",
+						aliases: ["restore encryption key"],
+						visible: () => !this.plugin.settings.importedRecoveryKey,
+						render: (setting) => {
+							let recoveryKey = "";
+							setting
+								.addText((text) => {
+									text.setPlaceholder("<base64>.<base64>.<base64>");
+									text.onChange((value) => (recoveryKey = value.trim()));
+								})
+								.addButton((button) => {
+									button.setButtonText("Import");
+									button.onClick(async () => {
+										try {
+											await this.plugin.importAndVerifyRecoveryKey(recoveryKey);
+											new Notice("Recovery key imported and verified.");
+											this.update();
+										} catch (error) {
+											new Notice(`Recovery-key import failed: ${errorMessage(error)}`);
+										}
+									});
+								});
+						},
+					},
+				],
+			},
+			{
+				type: "group",
+				heading: "Synchronization",
+				items: [
+					{
+						name: "Pair another device",
+						desc: "Copy a pairing code containing this vault's identity and R2 location, but no credentials or encryption keys.",
+						aliases: ["pairing code", "new device"],
+						visible: () => Boolean(this.plugin.settings.vaultId && this.plugin.settings.encryptedSyncBaseline),
+						render: (setting) => {
+							setting.addButton((button) => {
+								button.setButtonText("Copy pairing code");
+								button.onClick(async () => {
+									try {
+										await this.plugin.copyPairingCode();
+										new Notice("Pairing code copied.");
+									} catch (error) {
+										new Notice(`Pairing-code export failed: ${errorMessage(error)}`);
+									}
+								});
+							});
+						},
+					},
+					{
+						name: "Pair this device",
+						desc: "Paste a pairing code from the device that initialized this vault. Credentials and passphrase are entered separately.",
+						aliases: ["pairing code", "join vault"],
+						visible: () => !(this.plugin.settings.vaultId && this.plugin.settings.encryptedSyncBaseline),
+						render: (setting) => {
+							let pairingCode = "";
+							setting
+								.addText((text) => {
+									text.setPlaceholder("Isomite pairing code");
+									text.onChange((value) => (pairingCode = value.trim()));
+								})
+								.addButton((button) => {
+									button.setButtonText("Import pairing code");
+									button.onClick(async () => {
+										try {
+											await this.plugin.importPairingCode(pairingCode);
+											new Notice("Pairing code imported. Enter this device's R2 credentials and encryption passphrase.");
+											this.update();
+										} catch (error) {
+											new Notice(`Pairing-code import failed: ${errorMessage(error)}`);
+										}
+									});
+								});
+						},
+					},
+					{
+						name: "Review changes now",
+						desc: "Scan local and R2 state, then show every proposed change before anything is applied.",
+						aliases: ["manual sync", "sync now"],
+						render: (setting) => {
+							setting.addButton((button) => {
+								button.setButtonText("Review sync").setCta();
+								button.onClick(() => void this.plugin.reviewAndSync());
+							});
+						},
+					},
+					{
+						name: "Global ignore patterns",
+						desc: "One glob per line. Encrypted rules apply to every paired device after the reviewed sync is approved.",
+						aliases: ["exclude files", "ignore folders", "glob"],
+						control: {
+							type: "textarea",
+							key: "customIgnorePatternsText",
+							placeholder: "Private/**\nArchive/*.zip",
+							rows: 4,
+							validate: (value) => {
+								try {
+									validateIgnorePatterns(value.split("\n"));
+								} catch (error) {
+									return errorMessage(error);
+								}
+							},
+						},
+					},
+					{
+						name: "Sync on startup",
+						desc: "Prepare a review after Obsidian starts. Changes are never applied automatically.",
+						aliases: ["automatic sync"],
+						control: { type: "toggle", key: "syncOnStartup" },
+					},
+					{
+						name: "Sync after saves",
+						desc: "Prepare one quiet review after 30 seconds without vault changes. Changes are never applied automatically.",
+						aliases: ["save trigger", "automatic sync"],
+						control: { type: "toggle", key: "syncOnSave" },
+					},
+				],
+			},
+		];
+	}
+
+	getControlValue(key: string): unknown {
+		switch (key) {
+			case "bucket": return this.plugin.settings.bucket;
+			case "accessKeyId": return this.plugin.settings.accessKeyId;
+			case "customIgnorePatternsText": return this.plugin.settings.customIgnorePatterns.join("\n");
+			case "syncOnStartup": return this.plugin.settings.syncOnStartup;
+			case "syncOnSave": return this.plugin.settings.syncOnSave;
+			default: return undefined;
+		}
+	}
+
+	async setControlValue(key: string, value: unknown): Promise<void> {
+		switch (key) {
+			case "bucket":
+				this.plugin.settings.bucket = String(value).trim();
+				break;
+			case "accessKeyId":
+				this.plugin.settings.accessKeyId = String(value).trim();
+				break;
+			case "customIgnorePatternsText":
+				this.plugin.settings.customIgnorePatterns = validateIgnorePatterns(String(value).split("\n"));
+				this.plugin.settings.ignorePatternsDirty = true;
+				break;
+			case "syncOnStartup":
+				this.plugin.settings.syncOnStartup = Boolean(value);
+				break;
+			case "syncOnSave":
+				this.plugin.settings.syncOnSave = Boolean(value);
+				break;
+			default:
+				return;
+		}
+		await this.plugin.saveSettings();
 	}
 
 	display(): void {
