@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { unzipSync, strFromU8 } from "fflate";
 import { createVaultZipBackup } from "../src/sync/backup";
+import { SyncCancelledError } from "../src/sync/progress";
 import { SyncVaultAdapter, VaultFileMeta } from "../src/sync/vault-adapter";
 
 class BackupVault implements SyncVaultAdapter {
@@ -19,9 +20,27 @@ class BackupVault implements SyncVaultAdapter {
 
 describe("first-sync backup", () => {
 	it("creates a valid ZIP containing every scanned vault file", async () => {
-		const files = unzipSync(await createVaultZipBackup(new BackupVault()));
+		const progress: number[] = [];
+		const files = unzipSync(await createVaultZipBackup(
+			new BackupVault(),
+			[],
+			(update) => progress.push(update.percent)
+		));
 
 		expect(strFromU8(files["Note.md"])).toBe("note");
 		expect(files["Folder/Data.bin"]).toEqual(new Uint8Array([1, 2, 3]));
+		expect(progress).toEqual([33, 35]);
+	});
+
+	it("stops before reading files when cancelled", async () => {
+		const controller = new AbortController();
+		controller.abort();
+
+		await expect(createVaultZipBackup(
+			new BackupVault(),
+			[],
+			undefined,
+			controller.signal
+		)).rejects.toBeInstanceOf(SyncCancelledError);
 	});
 });

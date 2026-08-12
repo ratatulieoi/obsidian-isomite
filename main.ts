@@ -1,4 +1,4 @@
-import { Notice, Plugin } from "obsidian";
+import { Notice, Plugin, setIcon } from "obsidian";
 import {
 	DerivedKeys,
 	exportRecoveryKey,
@@ -21,6 +21,7 @@ import { commitPreparedSync, prepareSync } from "./src/sync/executor";
 import { resumeSyncJournal } from "./src/sync/journal";
 import { createPairingCode, parsePairingCode } from "./src/sync/pairing";
 import { createVaultZipBackup } from "./src/sync/backup";
+import { SyncCancelledError, SyncProgress } from "./src/sync/progress";
 
 export default class IsomitePlugin extends Plugin {
 	settings: IsomiteSettings = { ...DEFAULT_SETTINGS };
@@ -28,10 +29,26 @@ export default class IsomitePlugin extends Plugin {
 	private syncBusy = false;
 	private syncRescanQueued?: "manual" | "automatic";
 	private saveSyncTimer?: number;
+	private syncRibbonEl?: HTMLElement;
+	private syncProgressNotice?: Notice;
+	private syncAbortController?: AbortController;
+	private syncCanCancel = false;
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
 		this.addSettingTab(new IsomiteSettingTab(this.app, this));
+		this.syncRibbonEl = this.addRibbonIcon("refresh-cw", "Review and sync Isomite", () => {
+			if (this.syncBusy) {
+				if (this.syncCanCancel) {
+					this.syncAbortController?.abort();
+					this.updateSyncProgress({ percent: 75, stage: "Cancelling before commit" });
+				} else {
+					new Notice("Isomite has committed this sync and must finish applying it.");
+				}
+				return;
+			}
+			void this.reviewAndSync(false);
+		});
 		this.addCommand({
 			id: "sync-review",
 			name: "Review and sync vault",
@@ -48,6 +65,11 @@ export default class IsomitePlugin extends Plugin {
 
 	onunload(): void {
 		if (this.saveSyncTimer !== undefined) window.clearTimeout(this.saveSyncTimer);
+		this.syncProgressNotice?.hide();
+	}
+
+	isSyncBusy(): boolean {
+		return this.syncBusy;
 	}
 
 	async saveSettings(): Promise<void> {
@@ -157,16 +179,23 @@ export default class IsomitePlugin extends Plugin {
 			return;
 		}
 		if (this.syncBusy) {
-			if (!automatic || !this.syncRescanQueued) this.syncRescanQueued = automatic ? "automatic" : "manual";
+			if (!automatic) new Notice("Isomite sync is already in progress.");
+			else if (!this.syncRescanQueued) this.syncRescanQueued = "automatic";
 			return;
 		}
 		this.syncBusy = true;
+		this.syncAbortController = new AbortController();
+		this.syncCanCancel = true;
+		this.setSyncUiBusy(true);
+		this.updateSyncProgress({ percent: 1, stage: "Starting sync" });
 		try {
+			this.updateSyncProgress({ percent: 5, stage: "Verifying encryption" });
 			await this.initializeOrVerifyEncryption();
 			const keys = this.cachedEncryptionKeys;
 			if (!keys) throw new Error("Encryption keys are not available.");
 			const client = this.createR2Client();
 			const store = new RevisionStore(client, keys);
+			this.updateSyncProgress({ percent: 10, stage: "Reading sync state" });
 			const vault = new ObsidianSyncVaultAdapter(this.app);
 			const persistence = {
 				save: async (journal: Parameters<typeof encodeLocalJournal>[1] | undefined) => {
@@ -180,11 +209,19 @@ export default class IsomitePlugin extends Plugin {
 					this.settings.encryptedSyncJournal = "";
 					await this.saveSettings();
 				} else {
-					const baseline = await resumeSyncJournal(journal, vault, store, keys, persistence);
+					this.updateSyncProgress({ percent: 85, stage: "Finishing previously committed sync" });
+					const baseline = await resumeSyncJournal(
+						journal,
+						vault,
+						store,
+						keys,
+						persistence,
+						(progress) => this.updateSyncProgress(progress)
+					);
 					this.settings.encryptedSyncBaseline = await encodeLocalBaseline(keys, baseline);
 					this.settings.vaultId = baseline.vaultId;
 					await this.saveSettings();
-					new Notice("Isomite finished recovering the previously approved sync. Review again for newer changes.");
+					this.finishSyncProgress("Isomite finished the previously committed sync. Review again for newer changes.");
 					return;
 				}
 			}
@@ -208,6 +245,7 @@ export default class IsomitePlugin extends Plugin {
 			const requestedIgnorePatterns = this.settings.ignorePatternsDirty
 				? this.settings.customIgnorePatterns
 				: undefined;
+			this.updateSyncProgress({ percent: 15, stage: "Scanning local and R2 files" });
 			const planned = await createSyncPlan({
 				vault,
 				store,
@@ -219,26 +257,43 @@ export default class IsomitePlugin extends Plugin {
 				requestedIgnorePatterns,
 				configDir: this.app.vault.configDir,
 				readBase: async (_path, contentHash) => store.getBlob(contentHash),
+				onProgress: (progress) => this.updateSyncProgress(progress),
+				signal: this.syncAbortController.signal,
 			});
+			if (this.syncAbortController.signal.aborted) throw new SyncCancelledError();
+			this.updateSyncProgress({ percent: 30, stage: "Sync plan ready" });
 			const changes = planned.plan.entries.filter((entry) => entry.action !== "noop");
 			const ignoreRulesChanged = requestedIgnorePatterns !== undefined &&
 				JSON.stringify([...requestedIgnorePatterns].sort()) !== JSON.stringify([...planned.remoteIgnorePatterns].sort());
 			planned.plan.ignoreRulesChanged = ignoreRulesChanged;
 			if (!changes.length && !ignoreRulesChanged) {
-				if (!automatic) new Notice("Isomite is up to date.");
+				this.finishSyncProgress("Isomite is up to date.");
 				return;
 			}
 			if (automatic) {
 				const changeCount = changes.length + (ignoreRulesChanged ? 1 : 0);
-				new Notice(`Isomite found ${changeCount} pending change${changeCount === 1 ? "" : "s"}. Run “Review and sync vault” to inspect them.`);
+				this.finishSyncProgress(`Isomite found ${changeCount} pending change${changeCount === 1 ? "" : "s"}. Use the ribbon sync button to review.`);
 				return;
 			}
+			this.updateSyncProgress({ percent: 30, stage: "Waiting for review" });
 			const review = await new SyncReviewModal(this.app, planned.plan).openAndWait();
-			if (!review.approved) return;
+			if (this.syncAbortController.signal.aborted) throw new SyncCancelledError();
+			if (!review.approved) {
+				this.finishSyncProgress("Isomite sync cancelled. No reviewed changes were committed.");
+				return;
+			}
 			if (planned.plan.mode === "initialUpload") {
-				const archive = await createVaultZipBackup(vault, requestedIgnorePatterns ?? planned.remoteIgnorePatterns);
+				this.updateSyncProgress({ percent: 30, stage: "Creating first-sync backup" });
+				const archive = await createVaultZipBackup(
+					vault,
+					requestedIgnorePatterns ?? planned.remoteIgnorePatterns,
+					(progress) => this.updateSyncProgress(progress),
+					this.syncAbortController.signal
+				);
 				await this.saveFirstSyncBackup(archive);
 			}
+			if (this.syncAbortController.signal.aborted) throw new SyncCancelledError();
+			this.updateSyncProgress({ percent: 35, stage: "Preparing reviewed changes" });
 			const prepared = await prepareSync({
 				plan: planned.plan,
 				vault,
@@ -251,25 +306,72 @@ export default class IsomitePlugin extends Plugin {
 				remoteHead: planned.remoteHead,
 				ignorePatterns: requestedIgnorePatterns ?? planned.remoteIgnorePatterns,
 				decisions: review.decisions,
+				onProgress: (progress) => this.updateSyncProgress(progress),
+				signal: this.syncAbortController.signal,
 			});
+			this.syncCanCancel = false;
+			this.setSyncUiBusy(true);
+			this.updateSyncProgress({ percent: 78, stage: "Committing sync; do not close Obsidian" });
 			await commitPreparedSync(prepared, store, persistence, vault, keys, planned.remoteHead);
-			const completedBaseline = await resumeSyncJournal(prepared.journal, vault, store, keys, persistence);
+			this.updateSyncProgress({ percent: 85, stage: "Applying committed local changes" });
+			const completedBaseline = await resumeSyncJournal(
+				prepared.journal,
+				vault,
+				store,
+				keys,
+				persistence,
+				(progress) => this.updateSyncProgress(progress)
+			);
 			this.settings.encryptedSyncBaseline = await encodeLocalBaseline(keys, completedBaseline);
 			this.settings.vaultId = completedBaseline.vaultId;
 			this.settings.ignorePatternsDirty = false;
 			await this.saveSettings();
 			const changeCount = changes.length + (ignoreRulesChanged ? 1 : 0);
-			new Notice(`Isomite applied ${changeCount} reviewed change${changeCount === 1 ? "" : "s"}.`);
+			this.finishSyncProgress(`Isomite sync complete. Applied ${changeCount} reviewed change${changeCount === 1 ? "" : "s"}.`);
 		} catch (error) {
-			new Notice(`Isomite sync stopped: ${String(error)}`, 10_000);
+			if (error instanceof SyncCancelledError) {
+				this.finishSyncProgress("Isomite sync cancelled before commit. No reviewed changes were applied.");
+			} else {
+				this.finishSyncProgress(`Isomite sync failed: ${String(error)}`, 10_000);
+			}
 		} finally {
 			this.syncBusy = false;
+			this.syncCanCancel = false;
+			this.syncAbortController = undefined;
+			this.setSyncUiBusy(false);
 			if (this.syncRescanQueued) {
 				const queued = this.syncRescanQueued;
 				this.syncRescanQueued = undefined;
 				window.setTimeout(() => void this.reviewAndSync(queued === "automatic"), 0);
 			}
 		}
+	}
+
+	private setSyncUiBusy(busy: boolean): void {
+		if (!this.syncRibbonEl) return;
+		this.syncRibbonEl.toggleClass("is-disabled", busy && !this.syncCanCancel);
+		this.syncRibbonEl.setAttribute("aria-disabled", String(busy && !this.syncCanCancel));
+		this.syncRibbonEl.setAttribute(
+			"aria-label",
+			!busy ? "Review and sync Isomite" : this.syncCanCancel ? "Cancel Isomite sync before commit" : "Isomite sync committed; finishing"
+		);
+		setIcon(this.syncRibbonEl, !busy ? "refresh-cw" : this.syncCanCancel ? "square" : "loader-circle");
+	}
+
+	private updateSyncProgress(progress: SyncProgress): void {
+		const message = `Isomite sync ${progress.percent}% — ${progress.stage}`;
+		if (this.syncProgressNotice) this.syncProgressNotice.setMessage(message);
+		else this.syncProgressNotice = new Notice(message, 0);
+		this.syncProgressNotice.containerEl.setAttribute("role", "progressbar");
+		this.syncProgressNotice.containerEl.setAttribute("aria-valuemin", "0");
+		this.syncProgressNotice.containerEl.setAttribute("aria-valuemax", "100");
+		this.syncProgressNotice.containerEl.setAttribute("aria-valuenow", String(progress.percent));
+	}
+
+	private finishSyncProgress(stage: string, duration = 6_000): void {
+		this.syncProgressNotice?.hide();
+		this.syncProgressNotice = undefined;
+		new Notice(stage, duration);
 	}
 
 	private async saveFirstSyncBackup(archive: Uint8Array): Promise<void> {

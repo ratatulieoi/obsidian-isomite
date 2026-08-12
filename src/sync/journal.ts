@@ -1,5 +1,6 @@
 import { DerivedKeys, keyedContentHash } from "../crypto/crypto";
 import { RevisionStore } from "./revision-store";
+import { reportProgress, SyncProgressCallback } from "./progress";
 import { SYNC_JOURNAL_FORMAT, SyncBaseline, SyncJournal } from "./types";
 import { SyncVaultAdapter } from "./vault-adapter";
 
@@ -13,12 +14,15 @@ export async function resumeSyncJournal(
 	vault: SyncVaultAdapter,
 	store: RevisionStore,
 	keys: DerivedKeys,
-	persistence: JournalPersistence
+	persistence: JournalPersistence,
+	onProgress?: SyncProgressCallback
 ): Promise<SyncBaseline> {
 	if (journal.format !== SYNC_JOURNAL_FORMAT) throw new Error("Unsupported Isomite sync journal.");
 	if (journal.phase !== "committed") throw new Error("An uncommitted sync journal cannot be resumed locally.");
 
 	const targetHashByPath = new Map(journal.targetFiles.map((file) => [file.path, file.contentHash]));
+	const totalOperations = journal.operations.length;
+	let completedOperations = 0;
 	while (journal.operations.length > 0) {
 		const operation = journal.operations[0];
 		if (operation.type === "write") {
@@ -37,6 +41,12 @@ export async function resumeSyncJournal(
 		await assertOperationApplied(operation, targetHashByPath.get(operation.path), vault, keys);
 		journal.operations.shift();
 		await persistence.save(journal);
+		completedOperations++;
+		reportProgress(
+			onProgress,
+			85 + (completedOperations / Math.max(totalOperations, 1)) * 14,
+			`Applying ${completedOperations} of ${totalOperations} local changes`
+		);
 	}
 
 	await persistence.save(undefined);

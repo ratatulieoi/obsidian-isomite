@@ -3,6 +3,7 @@ import { assertLocalPlanStillCurrent } from "./scanner";
 import { JournalPersistence } from "./journal";
 import { RevisionStore, StoredHead } from "./revision-store";
 import { assertNoPathCollisions } from "./path-guards";
+import { reportProgress, SyncCancelledError, SyncProgressCallback } from "./progress";
 import {
 	FileState,
 	REMOTE_REVISION_FORMAT,
@@ -41,6 +42,8 @@ export interface PrepareSyncInput {
 	decisions?: DeleteVsEditDecision[];
 	now?: Date;
 	revisionId?: string;
+	onProgress?: SyncProgressCallback;
+	signal?: AbortSignal;
 }
 
 /**
@@ -48,6 +51,7 @@ export interface PrepareSyncInput {
  * revision, and a durable local-apply journal. It does not advance R2 head.
  */
 export async function prepareSync(input: PrepareSyncInput): Promise<PreparedSync> {
+	throwIfCancelled(input.signal);
 	const localExpectations = input.plan.entries.map((entry) => ({ path: entry.path, state: entry.local }));
 	await assertLocalPlanStillCurrent(input.vault, input.keys, localExpectations, input.ignorePatterns);
 	const files = new Map(input.remoteFiles.map((file) => [file.path, { ...file }]));
@@ -55,7 +59,10 @@ export async function prepareSync(input: PrepareSyncInput): Promise<PreparedSync
 	const decisions = new Map((input.decisions ?? []).map((decision) => [decision.path, decision.winner]));
 	const now = input.now ?? new Date();
 
+	const activeEntries = input.plan.entries.filter((entry) => entry.action !== "noop");
+	let processedEntries = 0;
 	for (const entry of input.plan.entries) {
+		throwIfCancelled(input.signal);
 		switch (entry.action) {
 			case "noop":
 				break;
@@ -102,6 +109,14 @@ export async function prepareSync(input: PrepareSyncInput): Promise<PreparedSync
 				break;
 			}
 		}
+		if (entry.action !== "noop") {
+			processedEntries++;
+			reportProgress(
+				input.onProgress,
+				35 + (processedEntries / Math.max(activeEntries.length, 1)) * 40,
+				`Preparing ${processedEntries} of ${activeEntries.length} changes`
+			);
+		}
 	}
 
 	assertExpectedRemoteHead(input);
@@ -139,7 +154,9 @@ export async function prepareSync(input: PrepareSyncInput): Promise<PreparedSync
 	};
 	// Uploading a large plan can take time. Verify every reviewed local path a
 	// second time immediately before allowing the conditional remote commit.
+	throwIfCancelled(input.signal);
 	await assertLocalPlanStillCurrent(input.vault, input.keys, localExpectations, input.ignorePatterns);
+	throwIfCancelled(input.signal);
 	return { revision, journal, localExpectations, ignorePatterns: input.ignorePatterns };
 }
 
@@ -261,6 +278,10 @@ function sameRemoteFiles(left: RemoteRevisionFile[], right: RemoteRevisionFile[]
 
 function sameStrings(left: string[], right: string[]): boolean {
 	return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function throwIfCancelled(signal: AbortSignal | undefined): void {
+	if (signal?.aborted) throw new SyncCancelledError();
 }
 
 function invalidEntry(path: string): Error {

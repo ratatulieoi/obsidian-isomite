@@ -7,6 +7,7 @@ import { SyncBaseline, SyncPlan } from "./types";
 import { SyncVaultAdapter } from "./vault-adapter";
 import { assertRemoteDidNotRollback, assertRemoteIdentity } from "./guards";
 import { isIgnoredPath } from "./ignore";
+import { SyncProgressCallback } from "./progress";
 
 export interface PlannedSync {
 	plan: SyncPlan;
@@ -26,6 +27,8 @@ export interface CreatePlanInput {
 	requestedIgnorePatterns?: string[];
 	configDir: string;
 	readBase?: (path: string, contentHash: string) => Promise<Uint8Array | undefined>;
+	onProgress?: SyncProgressCallback;
+	signal?: AbortSignal;
 }
 
 /** Read-only scan used by manual/startup/save triggers. */
@@ -40,7 +43,14 @@ export async function createSyncPlan(input: CreatePlanInput): Promise<PlannedSyn
 	}
 	const remoteIgnorePatterns = remoteRevision?.ignorePatterns ?? [];
 	const ignorePatterns = input.requestedIgnorePatterns ?? remoteIgnorePatterns;
-	const localFiles = await scanLocalFiles(input.vault, input.keys, input.baseline, ignorePatterns);
+	const localFiles = await scanLocalFiles(
+		input.vault,
+		input.keys,
+		input.baseline,
+		ignorePatterns,
+		input.onProgress,
+		input.signal
+	);
 	const ignoredRemotePaths = (remoteRevision?.files ?? [])
 		.filter((file) => isIgnoredPath(file.path, ignorePatterns, input.configDir))
 		.map((file) => file.path);

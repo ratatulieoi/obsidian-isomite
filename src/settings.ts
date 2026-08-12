@@ -317,8 +317,16 @@ export class IsomiteSettingTab extends PluginSettingTab {
 						aliases: ["manual sync", "sync now"],
 						render: (setting) => {
 							setting.addButton((button) => {
-								button.setButtonText("Review sync").setCta();
-								button.onClick(() => void this.plugin.reviewAndSync());
+								const refresh = () => {
+									const busy = this.plugin.isSyncBusy();
+									button.setDisabled(busy).setButtonText(busy ? "Sync in progress…" : "Review sync");
+								};
+								refresh();
+								if (!this.plugin.isSyncBusy()) button.setCta();
+								button.onClick(() => {
+									if (this.plugin.isSyncBusy()) return;
+									void this.plugin.reviewAndSync().finally(() => this.update());
+								});
 							});
 						},
 					},

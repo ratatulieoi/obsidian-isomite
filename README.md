@@ -18,6 +18,7 @@ Isomite is an Obsidian plugin for controlled vault synchronization through a pri
 - Avoid browser CORS limitations without operating a separate backend.
 - Build a complete upload/download/delete/merge plan before changing either side.
 - Review every proposed change before applying the complete plan.
+- Start sync from the Obsidian ribbon and follow persistent percentage progress without opening plugin settings.
 - Store encrypted immutable revisions and deduplicated encrypted file blobs.
 - Preserve deletion history and recover interrupted local application with an encrypted journal.
 - Pair additional devices with one generated secret code containing everything needed to connect.
@@ -72,6 +73,12 @@ Isomite makes direct HTTPS requests only to the Cloudflare R2 S3 API endpoint co
 The endpoint, bucket name, Access Key ID, Secret Access Key, encryption passphrase, and any imported recovery key are stored by Obsidian in `.obsidian/plugins/isomite/data.json`. Obsidian plugin settings are plaintext local data, so protect the device and vault accordingly. Sync baselines and crash journals stored there are separately encrypted. Isomite never uploads its own plugin folder. Do not commit or share `data.json`.
 
 The encryption metadata object contains a random salt and encrypted key verifier. The salt is not secret, and the verifier does not reveal the passphrase. Vault content and revision metadata are encrypted before upload; filenames and paths are not stored as readable R2 object keys.
+
+## Sync progress and interruption safety
+
+Select the **Isomite sync** ribbon icon to scan and review without opening settings. Only one sync can run at a time, and a persistent notice reports its current stage and percentage. Before commit, the ribbon changes to a stop icon and can cancel the run.
+
+Before the atomic remote-head commit, cancellation or failure does not activate the prepared revision or apply local changes. Deduplicated encrypted blobs uploaded during preparation may remain unreferenced until cleanup. After the commit, the ribbon becomes a non-cancellable progress icon and local application is stored in an encrypted journal; if Obsidian closes, Isomite resumes that committed work before allowing a newer sync.
 
 ## Current safety limits
 

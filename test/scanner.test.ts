@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { deriveKeys, generateSaltBase64, keyedContentHash } from "../src/crypto/crypto";
+import { SyncCancelledError } from "../src/sync/progress";
 import { assertLocalPlanStillCurrent, scanLocalFiles, StaleSyncPlanError } from "../src/sync/scanner";
 import { SYNC_BASELINE_FORMAT, SyncBaseline } from "../src/sync/types";
 import { SyncVaultAdapter, VaultFileMeta } from "../src/sync/vault-adapter";
@@ -40,9 +41,23 @@ describe("local scanner", () => {
 			files: [{ path: "Note.md", size: bytes.byteLength, mtime: 10, contentHash }],
 		};
 
-		const result = await scanLocalFiles(vault, keys, baseline);
+		const progress: number[] = [];
+		const result = await scanLocalFiles(vault, keys, baseline, [], (update) => progress.push(update.percent));
 
 		expect(result[0].contentHash).toBe(contentHash);
+		expect(vault.reads).toBe(0);
+		expect(progress).toEqual([30]);
+	});
+
+	it("stops before scanning when cancelled", async () => {
+		const keys = await deriveKeys("passphrase", generateSaltBase64());
+		const vault = new MemoryVault();
+		vault.files.set("Note.md", { bytes: new TextEncoder().encode("note"), mtime: 1 });
+		const controller = new AbortController();
+		controller.abort();
+
+		await expect(scanLocalFiles(vault, keys, undefined, [], undefined, controller.signal))
+			.rejects.toBeInstanceOf(SyncCancelledError);
 		expect(vault.reads).toBe(0);
 	});
 

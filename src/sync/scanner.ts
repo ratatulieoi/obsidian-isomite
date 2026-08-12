@@ -1,4 +1,5 @@
 import { DerivedKeys, keyedContentHash } from "../crypto/crypto";
+import { SyncCancelledError, SyncProgressCallback } from "./progress";
 import { FileState, SyncBaseline } from "./types";
 import { SyncVaultAdapter } from "./vault-adapter";
 
@@ -6,22 +7,32 @@ export async function scanLocalFiles(
 	vault: SyncVaultAdapter,
 	keys: DerivedKeys,
 	baseline?: SyncBaseline,
-	ignorePatterns: string[] = []
+	ignorePatterns: string[] = [],
+	onProgress?: SyncProgressCallback,
+	signal?: AbortSignal
 ): Promise<FileState[]> {
 	const baselineByPath = new Map((baseline?.files ?? []).map((file) => [file.path, file]));
 	const metadata = await vault.listFiles(ignorePatterns);
 	const states: FileState[] = [];
 
+	let completedFiles = 0;
 	for (const file of metadata) {
+		if (signal?.aborted) throw new SyncCancelledError();
 		const previous = baselineByPath.get(file.path);
 		if (previous && previous.mtime === file.mtime && previous.size === file.size) {
 			states.push({ ...file, contentHash: previous.contentHash });
+			completedFiles++;
+			reportScanProgress(onProgress, completedFiles, metadata.length);
 			continue;
 		}
 		const bytes = await vault.readFile(file.path);
 		if (bytes.byteLength !== file.size) throw new Error(`File changed while scanning: ${file.path}`);
 		states.push({ ...file, contentHash: await keyedContentHash(keys.contentHashKey, bytes) });
+		completedFiles++;
+		reportScanProgress(onProgress, completedFiles, metadata.length);
 	}
+	if (signal?.aborted) throw new SyncCancelledError();
+	if (metadata.length === 0) reportScanProgress(onProgress, 0, 0);
 	return states;
 }
 
@@ -51,6 +62,13 @@ export async function assertLocalPlanStillCurrent(
 	for (const path of currentByPath.keys()) {
 		if (!expectedByPath.has(path)) throw new StaleSyncPlanError(path);
 	}
+}
+
+function reportScanProgress(callback: SyncProgressCallback | undefined, completed: number, total: number): void {
+	callback?.({
+		percent: total === 0 ? 30 : 15 + Math.round((completed / total) * 15),
+		stage: total === 0 ? "Local scan complete" : `Scanning ${completed} of ${total} local files`,
+	});
 }
 
 export class StaleSyncPlanError extends Error {

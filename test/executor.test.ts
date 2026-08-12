@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { deriveKeys, generateSaltBase64, keyedContentHash } from "../src/crypto/crypto";
 import { prepareSync } from "../src/sync/executor";
+import { SyncCancelledError } from "../src/sync/progress";
 import { RevisionStore } from "../src/sync/revision-store";
 import { SyncPlan } from "../src/sync/types";
 import { SyncVaultAdapter, VaultFileMeta } from "../src/sync/vault-adapter";
@@ -53,6 +54,7 @@ describe("prepareSync", () => {
 			entries: [{ path: "Note.md", action: "upload", reason: "localCreated", local: state }],
 		};
 		const store = fakeStore();
+		const progress: number[] = [];
 
 		const prepared = await prepareSync({
 			plan,
@@ -66,12 +68,40 @@ describe("prepareSync", () => {
 			ignorePatterns: [],
 			now: new Date("2026-08-01T00:00:00.000Z"),
 			revisionId: "revision-12345678",
+			onProgress: (update) => progress.push(update.percent),
 		});
 
 		expect(prepared.revision?.generation).toBe(1);
 		expect(prepared.revision?.files).toEqual([{ path: "Note.md", contentHash: "ab".repeat(32), size: 4 }]);
 		expect(prepared.journal.operations).toEqual([]);
 		expect(store.uploads).toHaveLength(1);
+		expect(progress).toEqual([75]);
+	});
+
+	it("cancels before preparing any reviewed change", async () => {
+		const keys = await deriveKeys("passphrase", generateSaltBase64());
+		const vault = new MemoryVault();
+		const controller = new AbortController();
+		controller.abort();
+		const plan: SyncPlan = {
+			mode: "initialUpload",
+			baseRevisionId: null,
+			remoteRevisionId: null,
+			entries: [],
+		};
+
+		await expect(prepareSync({
+			plan,
+			vault,
+			store: fakeStore(),
+			keys,
+			vaultId: "vault-12345678",
+			deviceId: "device-12345678",
+			remoteFiles: [],
+			remoteIgnorePatterns: [],
+			ignorePatterns: [],
+			signal: controller.signal,
+		})).rejects.toBeInstanceOf(SyncCancelledError);
 	});
 
 	it("requires an explicit decision for delete-versus-edit", async () => {
