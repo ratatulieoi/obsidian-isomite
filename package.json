@@ -1,6 +1,6 @@
 {
   "name": "isomite",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "private": true,
   "description": "Connect an Obsidian vault to a private Cloudflare R2 bucket for controlled synchronization.",
   "main": "main.js",
