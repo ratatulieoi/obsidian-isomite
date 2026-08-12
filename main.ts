@@ -22,6 +22,7 @@ import { resumeSyncJournal } from "./src/sync/journal";
 import { createPairingCode, parsePairingCode } from "./src/sync/pairing";
 import { createVaultZipBackup } from "./src/sync/backup";
 import { SyncCancelledError, SyncProgress } from "./src/sync/progress";
+import { SyncHistoryModal } from "./src/sync/history-modal";
 
 export default class IsomitePlugin extends Plugin {
 	settings: IsomiteSettings = { ...DEFAULT_SETTINGS };
@@ -37,7 +38,7 @@ export default class IsomitePlugin extends Plugin {
 	async onload(): Promise<void> {
 		await this.loadSettings();
 		this.addSettingTab(new IsomiteSettingTab(this.app, this));
-		this.syncRibbonEl = this.addRibbonIcon("refresh-cw", "Review and sync Isomite", () => {
+		this.syncRibbonEl = this.addRibbonIcon("refresh-cw", "Sync Isomite", () => {
 			if (this.syncBusy) {
 				if (this.syncCanCancel) {
 					this.syncAbortController?.abort();
@@ -51,7 +52,7 @@ export default class IsomitePlugin extends Plugin {
 		});
 		this.addCommand({
 			id: "sync-review",
-			name: "Review and sync vault",
+			name: "Sync vault",
 			callback: () => void this.reviewAndSync(false),
 		});
 		this.registerEvent(this.app.vault.on("modify", () => this.scheduleSaveReview()));
@@ -85,12 +86,18 @@ export default class IsomitePlugin extends Plugin {
 			const keys = await importRecoveryKey(this.settings.importedRecoveryKey);
 			await verifyRecoveryKey(this.createR2Client(), keys);
 			this.cachedEncryptionKeys = keys;
+			this.settings.encryptionVerified = true;
+			await this.saveSettings();
+			this.setSyncUiBusy(this.syncBusy);
 			return;
 		}
 		this.cachedEncryptionKeys = await initializeOrVerifyEncryption(
 			this.createR2Client(),
 			this.settings.passphrase
 		);
+		this.settings.encryptionVerified = true;
+		await this.saveSettings();
+		this.setSyncUiBusy(this.syncBusy);
 	}
 
 	async copyRecoveryKey(): Promise<void> {
@@ -152,10 +159,12 @@ export default class IsomitePlugin extends Plugin {
 				throw new Error("The pairing code does not match the Isomite vault in R2.");
 			}
 			this.settings.setupMode = "initialize";
+			this.settings.encryptionVerified = true;
 			await this.saveSettings();
 		} catch (error) {
+			this.cachedEncryptionKeys = undefined;
 			this.settings = previous;
-			this.clearCachedEncryptionKeys();
+			this.setSyncUiBusy(this.syncBusy);
 			throw error;
 		}
 	}
@@ -166,16 +175,40 @@ export default class IsomitePlugin extends Plugin {
 		await verifyRecoveryKey(this.createR2Client(), keys);
 		this.settings.importedRecoveryKey = value;
 		this.cachedEncryptionKeys = keys;
+		this.settings.encryptionVerified = true;
 		await this.saveSettings();
+		this.setSyncUiBusy(this.syncBusy);
 	}
 
 	clearCachedEncryptionKeys(): void {
 		this.cachedEncryptionKeys = undefined;
+		this.settings.encryptionVerified = false;
+		this.setSyncUiBusy(this.syncBusy);
+	}
+
+	isSyncReady(): boolean {
+		return this.settings.setupMode !== "pair" && this.hasConnectionSettings() && this.settings.encryptionVerified;
+	}
+
+	getEncryptionStatus(): "missing" | "unverified" | "encrypted" {
+		if (this.settings.encryptionVerified) return "encrypted";
+		return this.settings.passphrase || this.settings.importedRecoveryKey ? "unverified" : "missing";
+	}
+
+	async openSyncHistory(): Promise<void> {
+		if (!this.isSyncReady()) throw new Error("Complete R2 setup and verify vault encryption first.");
+		await this.initializeOrVerifyEncryption();
+		const keys = this.cachedEncryptionKeys;
+		if (!keys) throw new Error("Vault encryption is not unlocked.");
+		const store = new RevisionStore(this.createR2Client(), keys);
+		const head = await store.readHead();
+		if (!head) throw new Error("Sync once before viewing history.");
+		new SyncHistoryModal(this.app, head.head, store).open();
 	}
 
 	async reviewAndSync(automatic = false): Promise<void> {
-		if (this.settings.setupMode === "pair") {
-			if (!automatic) new Notice("Import a pairing code before reviewing sync.");
+		if (!this.isSyncReady()) {
+			if (!automatic) new Notice("Complete R2 setup and verify vault encryption before syncing.");
 			return;
 		}
 		if (this.syncBusy) {
@@ -221,7 +254,7 @@ export default class IsomitePlugin extends Plugin {
 					this.settings.encryptedSyncBaseline = await encodeLocalBaseline(keys, baseline);
 					this.settings.vaultId = baseline.vaultId;
 					await this.saveSettings();
-					this.finishSyncProgress("Isomite finished the previously committed sync. Review again for newer changes.");
+					this.finishSyncProgress("Isomite finished the interrupted sync. Select Sync again to check for newer changes.");
 					return;
 				}
 			}
@@ -272,14 +305,14 @@ export default class IsomitePlugin extends Plugin {
 			}
 			if (automatic) {
 				const changeCount = changes.length + (ignoreRulesChanged ? 1 : 0);
-				this.finishSyncProgress(`Isomite found ${changeCount} pending change${changeCount === 1 ? "" : "s"}. Use the ribbon sync button to review.`);
+				this.finishSyncProgress(`Isomite found ${changeCount} pending change${changeCount === 1 ? "" : "s"}. Select the ribbon Sync button to continue.`);
 				return;
 			}
-			this.updateSyncProgress({ percent: 30, stage: "Waiting for review" });
+			this.updateSyncProgress({ percent: 30, stage: "Waiting for confirmation" });
 			const review = await new SyncReviewModal(this.app, planned.plan).openAndWait();
 			if (this.syncAbortController.signal.aborted) throw new SyncCancelledError();
 			if (!review.approved) {
-				this.finishSyncProgress("Isomite sync cancelled. No reviewed changes were committed.");
+				this.finishSyncProgress("Isomite sync cancelled. No changes were applied.");
 				return;
 			}
 			if (planned.plan.mode === "initialUpload") {
@@ -293,7 +326,7 @@ export default class IsomitePlugin extends Plugin {
 				await this.saveFirstSyncBackup(archive);
 			}
 			if (this.syncAbortController.signal.aborted) throw new SyncCancelledError();
-			this.updateSyncProgress({ percent: 35, stage: "Preparing reviewed changes" });
+			this.updateSyncProgress({ percent: 35, stage: "Preparing confirmed changes" });
 			const prepared = await prepareSync({
 				plan: planned.plan,
 				vault,
@@ -301,6 +334,7 @@ export default class IsomitePlugin extends Plugin {
 				keys,
 				vaultId: this.settings.vaultId,
 				deviceId: this.settings.deviceId,
+				deviceName: this.settings.deviceName,
 				remoteFiles: planned.remoteFiles,
 				remoteIgnorePatterns: planned.remoteIgnorePatterns,
 				remoteHead: planned.remoteHead,
@@ -327,10 +361,10 @@ export default class IsomitePlugin extends Plugin {
 			this.settings.ignorePatternsDirty = false;
 			await this.saveSettings();
 			const changeCount = changes.length + (ignoreRulesChanged ? 1 : 0);
-			this.finishSyncProgress(`Isomite sync complete. Applied ${changeCount} reviewed change${changeCount === 1 ? "" : "s"}.`);
+			this.finishSyncProgress(`Isomite sync complete. Applied ${changeCount} change${changeCount === 1 ? "" : "s"}.`);
 		} catch (error) {
 			if (error instanceof SyncCancelledError) {
-				this.finishSyncProgress("Isomite sync cancelled before commit. No reviewed changes were applied.");
+				this.finishSyncProgress("Isomite sync cancelled before commit. No changes were applied.");
 			} else {
 				this.finishSyncProgress(`Isomite sync failed: ${String(error)}`, 10_000);
 			}
@@ -349,11 +383,18 @@ export default class IsomitePlugin extends Plugin {
 
 	private setSyncUiBusy(busy: boolean): void {
 		if (!this.syncRibbonEl) return;
-		this.syncRibbonEl.toggleClass("is-disabled", busy && !this.syncCanCancel);
-		this.syncRibbonEl.setAttribute("aria-disabled", String(busy && !this.syncCanCancel));
+		const disabled = (!busy && !this.isSyncReady()) || (busy && !this.syncCanCancel);
+		this.syncRibbonEl.toggleClass("is-disabled", disabled);
+		this.syncRibbonEl.setAttribute("aria-disabled", String(disabled));
 		this.syncRibbonEl.setAttribute(
 			"aria-label",
-			!busy ? "Review and sync Isomite" : this.syncCanCancel ? "Cancel Isomite sync before commit" : "Isomite sync committed; finishing"
+			!busy && !this.isSyncReady()
+				? "Complete R2 setup and verify vault encryption before syncing"
+				: !busy
+					? "Sync Isomite"
+					: this.syncCanCancel
+						? "Cancel Isomite sync before commit"
+						: "Isomite sync committed; finishing"
 		);
 		setIcon(this.syncRibbonEl, !busy ? "refresh-cw" : this.syncCanCancel ? "square" : "loader-circle");
 	}
@@ -393,6 +434,15 @@ export default class IsomitePlugin extends Plugin {
 		}, 30_000);
 	}
 
+	private hasConnectionSettings(): boolean {
+		return Boolean(
+			this.settings.endpoint &&
+			this.settings.bucket &&
+			this.settings.accessKeyId &&
+			this.settings.secretAccessKey
+		);
+	}
+
 	private createR2Client(): R2Client {
 		return new R2Client(
 			{
@@ -409,11 +459,17 @@ export default class IsomitePlugin extends Plugin {
 		const saved = (await this.loadData()) as Partial<IsomiteSettings> | null;
 		this.settings = { ...DEFAULT_SETTINGS, ...(saved ?? {}) };
 		if (!Array.isArray(this.settings.customIgnorePatterns)) this.settings.customIgnorePatterns = [];
+		if (typeof this.settings.deviceName !== "string") this.settings.deviceName = "";
+		if (typeof this.settings.encryptionVerified !== "boolean") this.settings.encryptionVerified = false;
 		if (typeof this.settings.ignorePatternsDirty !== "boolean") this.settings.ignorePatternsDirty = false;
 		if (this.settings.setupMode !== "initialize" && this.settings.setupMode !== "pair") this.settings.setupMode = "initialize";
 		let changed = false;
 		if (!this.settings.deviceId) {
 			this.settings.deviceId = `device-${crypto.randomUUID()}`;
+			changed = true;
+		}
+		if (!this.settings.deviceName.trim()) {
+			this.settings.deviceName = "My device";
 			changed = true;
 		}
 		if (changed) await this.saveSettings();

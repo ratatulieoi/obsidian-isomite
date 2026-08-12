@@ -35,6 +35,7 @@ export interface PrepareSyncInput {
 	keys: DerivedKeys;
 	vaultId: string;
 	deviceId: string;
+	deviceName: string;
 	remoteFiles: RemoteRevisionFile[];
 	remoteIgnorePatterns: string[];
 	remoteHead?: StoredHead;
@@ -133,6 +134,8 @@ export async function prepareSync(input: PrepareSyncInput): Promise<PreparedSync
 				generation: (input.remoteHead?.head.generation ?? 0) + 1,
 				createdAt: now.toISOString(),
 				deviceId: input.deviceId,
+				deviceName: input.deviceName,
+				changes: summarizeChanges(input.remoteFiles, targetFiles, input.plan),
 				files: targetFiles,
 				ignorePatterns: [...input.ignorePatterns].sort(),
 			}
@@ -265,6 +268,30 @@ function assertExpectedRemoteHead(input: PrepareSyncInput): void {
 	if (input.remoteHead && input.remoteHead.head.vaultId !== input.vaultId) {
 		throw new Error("The expected remote head belongs to another vault.");
 	}
+}
+
+function summarizeChanges(
+	before: RemoteRevisionFile[],
+	after: RemoteRevisionFile[],
+	plan: SyncPlan
+): RemoteRevision["changes"] {
+	const beforeByPath = new Map(before.map((file) => [file.path, file]));
+	const afterByPath = new Map(after.map((file) => [file.path, file]));
+	let added = 0;
+	let updated = 0;
+	let deleted = 0;
+	for (const [path, file] of afterByPath) {
+		const previous = beforeByPath.get(path);
+		if (!previous) added++;
+		else if (previous.contentHash !== file.contentHash) updated++;
+	}
+	for (const path of beforeByPath.keys()) {
+		if (!afterByPath.has(path)) deleted++;
+	}
+	const conflicts = plan.entries.filter((entry) =>
+		entry.action === "keepBoth" || entry.action === "mergeText" || entry.action === "chooseDeleteOrEdit"
+	).length;
+	return { added, updated, deleted, conflicts };
 }
 
 function sameRemoteFiles(left: RemoteRevisionFile[], right: RemoteRevisionFile[]): boolean {

@@ -19,6 +19,7 @@ Isomite is an Obsidian plugin for controlled vault synchronization through a pri
 - Build a complete upload/download/delete/merge plan before changing either side.
 - Review every proposed change before applying the complete plan.
 - Start sync from the Obsidian ribbon and follow persistent percentage progress without opening plugin settings.
+- Name each device and view recent encrypted sync history with simple change counts.
 - Store encrypted immutable revisions and deduplicated encrypted file blobs.
 - Preserve deletion history and recover interrupted local application with an encrypted journal.
 - Pair additional devices with one generated secret code containing everything needed to connect.
@@ -50,9 +51,9 @@ Isomite is an Obsidian plugin for controlled vault synchronization through a pri
    - **Access key ID**
    - **Secret access key**
 6. Select **Test connection**.
-7. Enter a long, unique encryption passphrase.
-8. Select **Verify encryption** to initialize or verify this bucket's Isomite encryption metadata.
-9. Select **Review sync**, approve the first upload, then export the recovery key and store it in a password manager outside the vault.
+7. Enter a long, unique vault passphrase.
+8. Select **Verify encryption**. Sync remains disabled until the vault is encrypted and this device can unlock it.
+9. Give the device a recognizable name, select **Sync**, approve the first upload, then copy the recovery key and store it in a password manager outside the vault.
 
 A bucket URL ending in `/<bucket>` is also accepted. Isomite immediately separates the endpoint and fills the **R2 bucket name** field.
 
@@ -62,7 +63,7 @@ A bucket URL ending in `/<bucket>` is also accepted. Isomite immediately separat
 2. Keep the code secret and store it somewhere safe. Anyone with it can access the synchronized vault.
 3. On the new device, choose **Pair to existing Isomite vault** at the top of Isomite settings. The other settings collapse.
 4. Paste the code, then select **Import and connect**.
-5. Select **Review sync** and approve the download.
+5. Give the new device a recognizable name, select **Sync**, and approve the download.
 
 The pairing code contains the R2 credentials and encryption access. It is a bearer secret, similar to a recovery key: do not post it publicly, leave it in shared clipboard history, or send it through an untrusted channel.
 
@@ -76,7 +77,7 @@ The encryption metadata object contains a random salt and encrypted key verifier
 
 ## Sync progress and interruption safety
 
-Select the **Isomite sync** ribbon icon to scan and review without opening settings. Only one sync can run at a time, and a persistent notice reports its current stage and percentage. Before commit, the ribbon changes to a stop icon and can cancel the run.
+Select the **Isomite sync** ribbon icon to scan and sync without opening settings. Only one sync can run at a time, and a persistent notice reports its current stage and percentage. Before commit, the ribbon changes to a stop icon and can cancel the run. Recent encrypted revisions can be viewed under **Settings → Isomite → Sync history**; the list is informational and does not restore older revisions.
 
 Before the atomic remote-head commit, cancellation or failure does not activate the prepared revision or apply local changes. Deduplicated encrypted blobs uploaded during preparation may remain unreferenced until cleanup. After the commit, the ribbon becomes a non-cancellable progress icon and local application is stored in an encrypted journal; if Obsidian closes, Isomite resumes that committed work before allowing a newer sync.
 

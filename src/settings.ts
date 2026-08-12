@@ -13,7 +13,9 @@ export interface IsomiteSettings {
 	secretAccessKey: string;
 	passphrase: string;
 	importedRecoveryKey: string;
+	encryptionVerified: boolean;
 	deviceId: string;
+	deviceName: string;
 	vaultId: string;
 	encryptedSyncBaseline: string;
 	encryptedSyncJournal: string;
@@ -31,7 +33,9 @@ export const DEFAULT_SETTINGS: IsomiteSettings = {
 	secretAccessKey: "",
 	passphrase: "",
 	importedRecoveryKey: "",
+	encryptionVerified: false,
 	deviceId: "",
+	deviceName: "",
 	vaultId: "",
 	encryptedSyncBaseline: "",
 	encryptedSyncJournal: "",
@@ -95,7 +99,7 @@ export class IsomiteSettingTab extends PluginSettingTab {
 									button.setDisabled(true).setButtonText("Importing…");
 									try {
 										await this.plugin.importPairingCode(pairingCode);
-										new Notice("Pairing code imported and verified. Review sync to download the vault.");
+										new Notice("Pairing code imported and verified. Name this device, then select Sync to download the vault.");
 										this.update();
 									} catch (error) {
 										new Notice(`Pairing import failed: ${errorText(error)}`);
@@ -125,6 +129,8 @@ export class IsomiteSettingTab extends PluginSettingTab {
 									const parsed = parseR2Endpoint(value);
 									this.plugin.settings.endpoint = parsed?.endpoint ?? value.trim();
 									if (parsed?.bucket) this.plugin.settings.bucket = parsed.bucket;
+									this.plugin.settings.encryptionVerified = false;
+									this.plugin.clearCachedEncryptionKeys();
 									await this.plugin.saveSettings();
 									if (parsed?.bucket) this.update();
 								});
@@ -154,6 +160,8 @@ export class IsomiteSettingTab extends PluginSettingTab {
 								text.setValue(this.plugin.settings.secretAccessKey);
 								text.onChange(async (value) => {
 									this.plugin.settings.secretAccessKey = value.trim();
+									this.plugin.settings.encryptionVerified = false;
+									this.plugin.clearCachedEncryptionKeys();
 									await this.plugin.saveSettings();
 								});
 							});
@@ -184,12 +192,16 @@ export class IsomiteSettingTab extends PluginSettingTab {
 			},
 			{
 				type: "group",
-				heading: "Encryption",
+				heading: "Vault encryption",
 				visible: () => this.plugin.settings.setupMode !== "pair",
 				items: [
 					{
-						name: "Encryption passphrase",
-						desc: "Stored locally for unattended scans. Use the same long, unique passphrase on every paired device.",
+						name: encryptionStatusName(this.plugin.getEncryptionStatus()),
+						desc: encryptionStatusDescription(this.plugin.getEncryptionStatus()),
+					},
+					{
+						name: "Vault passphrase",
+						desc: "Encrypts this vault before anything is sent to R2. Keep it somewhere safe.",
 						aliases: ["password", "encryption key"],
 						render: (setting) => {
 							setting.addText((text) => {
@@ -198,6 +210,7 @@ export class IsomiteSettingTab extends PluginSettingTab {
 								text.setValue(this.plugin.settings.passphrase);
 								text.onChange(async (value) => {
 									this.plugin.settings.passphrase = value;
+									this.plugin.settings.encryptionVerified = false;
 									this.plugin.clearCachedEncryptionKeys();
 									await this.plugin.saveSettings();
 								});
@@ -205,8 +218,8 @@ export class IsomiteSettingTab extends PluginSettingTab {
 						},
 					},
 					{
-						name: "Initialize or verify encryption",
-						desc: "Initialize an empty dedicated bucket or verify that this device unlocks its existing Isomite key.",
+						name: "Verify vault encryption",
+						desc: "Check that this device can unlock the vault. Sync stays disabled until this succeeds.",
 						aliases: ["verify passphrase", "initialize bucket"],
 						render: (setting) => {
 							setting.addButton((button) => {
@@ -215,7 +228,8 @@ export class IsomiteSettingTab extends PluginSettingTab {
 									button.setDisabled(true).setButtonText("Verifying…");
 									try {
 										await this.plugin.initializeOrVerifyEncryption();
-										new Notice("Encryption is initialized and the passphrase matches this bucket.");
+										new Notice("Vault is encrypted and ready to sync.");
+										this.update();
 									} catch (error) {
 										new Notice(`Encryption verification failed: ${errorText(error)}`);
 									} finally {
@@ -226,8 +240,8 @@ export class IsomiteSettingTab extends PluginSettingTab {
 						},
 					},
 					{
-						name: "Export recovery key",
-						desc: "Copy sensitive recovery key material for storage in a password manager outside this vault.",
+						name: "Recovery key",
+						desc: "An emergency code that unlocks the vault if you forget the passphrase. Store it outside this vault.",
 						aliases: ["backup encryption key"],
 						render: (setting) => {
 							setting.addButton((button) => {
@@ -244,14 +258,15 @@ export class IsomiteSettingTab extends PluginSettingTab {
 						},
 					},
 					{
-						name: "Imported recovery key",
-						desc: "Clear the locally stored imported recovery key and return to passphrase-based unlocking.",
+						name: "Recovery key in use",
+						desc: "This device currently unlocks the vault with an imported recovery key.",
 						visible: () => Boolean(this.plugin.settings.importedRecoveryKey),
 						render: (setting) => {
 							setting.addButton((button) => {
 								button.setButtonText("Clear recovery key");
 								button.onClick(async () => {
 									this.plugin.settings.importedRecoveryKey = "";
+									this.plugin.settings.encryptionVerified = false;
 									this.plugin.clearCachedEncryptionKeys();
 									await this.plugin.saveSettings();
 									this.update();
@@ -260,8 +275,8 @@ export class IsomiteSettingTab extends PluginSettingTab {
 						},
 					},
 					{
-						name: "Import recovery key",
-						desc: "Use a previously exported key if the passphrase is unavailable.",
+						name: "Unlock with recovery key",
+						desc: "Paste your emergency recovery code when the original passphrase is unavailable.",
 						aliases: ["restore encryption key"],
 						visible: () => !this.plugin.settings.importedRecoveryKey,
 						render: (setting) => {
@@ -293,6 +308,11 @@ export class IsomiteSettingTab extends PluginSettingTab {
 				visible: () => this.plugin.settings.setupMode !== "pair",
 				items: [
 					{
+						name: "Device name",
+						desc: "Shown in sync history so you know which device saved each change.",
+						control: { type: "text", key: "deviceName", placeholder: "My laptop" },
+					},
+					{
 						name: "Pair another device",
 						desc: "Copy a complete pairing code. Keep it secret and store it somewhere safe; anyone with the code can access this synchronized vault.",
 						aliases: ["pairing code", "new device"],
@@ -312,27 +332,45 @@ export class IsomiteSettingTab extends PluginSettingTab {
 						},
 					},
 					{
-						name: "Review changes now",
-						desc: "Scan local and R2 state, then show every proposed change before anything is applied.",
+						name: "Sync now",
+						desc: "Check this device and R2, show what changed, then sync after you confirm.",
 						aliases: ["manual sync", "sync now"],
 						render: (setting) => {
 							setting.addButton((button) => {
-								const refresh = () => {
-									const busy = this.plugin.isSyncBusy();
-									button.setDisabled(busy).setButtonText(busy ? "Sync in progress…" : "Review sync");
-								};
-								refresh();
-								if (!this.plugin.isSyncBusy()) button.setCta();
+								const busy = this.plugin.isSyncBusy();
+								const ready = this.plugin.isSyncReady();
+								button.setDisabled(busy || !ready).setButtonText(busy ? "Sync in progress…" : "Sync");
+								if (!busy && ready) button.setCta();
 								button.onClick(() => {
-									if (this.plugin.isSyncBusy()) return;
+									if (this.plugin.isSyncBusy() || !this.plugin.isSyncReady()) return;
 									void this.plugin.reviewAndSync().finally(() => this.update());
 								});
 							});
 						},
 					},
 					{
+						name: "Sync history",
+						desc: "See when this vault changed and which device saved each revision.",
+						visible: () => Boolean(this.plugin.settings.encryptedSyncBaseline),
+						render: (setting) => {
+							setting.addButton((button) => {
+								button.setButtonText("View history").setDisabled(!this.plugin.isSyncReady());
+								button.onClick(async () => {
+									button.setDisabled(true).setButtonText("Loading…");
+									try {
+										await this.plugin.openSyncHistory();
+									} catch (error) {
+										new Notice(`Sync history failed: ${errorText(error)}`);
+									} finally {
+										button.setDisabled(!this.plugin.isSyncReady()).setButtonText("View history");
+									}
+								});
+							});
+						},
+					},
+					{
 						name: "Global ignore patterns",
-						desc: "One glob per line. Encrypted rules apply to every paired device after the reviewed sync is approved.",
+						desc: "One glob per line. Encrypted rules apply to every paired device after the sync is confirmed.",
 						aliases: ["exclude files", "ignore folders", "glob"],
 						control: {
 							type: "textarea",
@@ -350,13 +388,13 @@ export class IsomiteSettingTab extends PluginSettingTab {
 					},
 					{
 						name: "Sync on startup",
-						desc: "Prepare a review after Obsidian starts. Changes are never applied automatically.",
+						desc: "Check for changes after Obsidian starts. Changes are never applied automatically.",
 						aliases: ["automatic sync"],
 						control: { type: "toggle", key: "syncOnStartup" },
 					},
 					{
 						name: "Sync after saves",
-						desc: "Prepare one quiet review after 30 seconds without vault changes. Changes are never applied automatically.",
+						desc: "Check quietly after 30 seconds without vault changes. Changes are never applied automatically.",
 						aliases: ["save trigger", "automatic sync"],
 						control: { type: "toggle", key: "syncOnSave" },
 					},
@@ -373,6 +411,8 @@ export class IsomiteSettingTab extends PluginSettingTab {
 				return this.plugin.settings.bucket;
 			case "accessKeyId":
 				return this.plugin.settings.accessKeyId;
+			case "deviceName":
+				return this.plugin.settings.deviceName;
 			case "customIgnorePatternsText":
 				return this.plugin.settings.customIgnorePatterns.join("\n");
 			case "syncOnStartup":
@@ -389,15 +429,29 @@ export class IsomiteSettingTab extends PluginSettingTab {
 			case "setupMode":
 				if (value !== "initialize" && value !== "pair") return;
 				this.plugin.settings.setupMode = value;
+				if (value === "pair") {
+					this.plugin.settings.encryptionVerified = false;
+					this.plugin.clearCachedEncryptionKeys();
+				}
 				await this.plugin.saveSettings();
 				this.update();
 				return;
 			case "bucket":
 				this.plugin.settings.bucket = String(value).trim();
+				this.plugin.settings.encryptionVerified = false;
+				this.plugin.clearCachedEncryptionKeys();
 				break;
 			case "accessKeyId":
 				this.plugin.settings.accessKeyId = String(value).trim();
+				this.plugin.settings.encryptionVerified = false;
+				this.plugin.clearCachedEncryptionKeys();
 				break;
+			case "deviceName": {
+				const deviceName = String(value).trim();
+				if (!deviceName || deviceName.length > 80) return;
+				this.plugin.settings.deviceName = deviceName;
+				break;
+			}
 			case "customIgnorePatternsText":
 				this.plugin.settings.customIgnorePatterns = validateIgnorePatterns(String(value).split("\n"));
 				this.plugin.settings.ignorePatternsDirty = true;
@@ -412,6 +466,22 @@ export class IsomiteSettingTab extends PluginSettingTab {
 				return;
 		}
 		await this.plugin.saveSettings();
+	}
+}
+
+function encryptionStatusName(status: "missing" | "unverified" | "encrypted"): string {
+	switch (status) {
+		case "missing": return "Encryption not set up";
+		case "unverified": return "Encryption needs verification";
+		case "encrypted": return "Vault is encrypted";
+	}
+}
+
+function encryptionStatusDescription(status: "missing" | "unverified" | "encrypted"): string {
+	switch (status) {
+		case "missing": return "Add a vault passphrase below. Sync is disabled until encryption is ready.";
+		case "unverified": return "Verify the passphrase or recovery key before syncing.";
+		case "encrypted": return "This device can unlock the vault. Files, filenames, and sync history are encrypted before upload.";
 	}
 }
 

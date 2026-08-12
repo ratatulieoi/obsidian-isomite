@@ -72,6 +72,12 @@ function assertRevision(value: unknown): asserts value is RemoteRevision {
 	if (!isGeneration(value.generation) || !isIsoDate(value.createdAt)) {
 		throw new Error("The encrypted revision metadata is invalid.");
 	}
+	if (value.deviceName !== undefined && (typeof value.deviceName !== "string" || !value.deviceName.trim() || value.deviceName.length > 80)) {
+		throw new Error("The encrypted revision device name is invalid.");
+	}
+	if (value.changes !== undefined && !isChangeSummary(value.changes)) {
+		throw new Error("The encrypted revision change summary is invalid.");
+	}
 	if (!Array.isArray(value.files) || !Array.isArray(value.ignorePatterns)) {
 		throw new Error("The encrypted revision file list is invalid.");
 	}
@@ -139,6 +145,11 @@ function isIdentifier(value: unknown): value is string {
 
 function isGeneration(value: unknown): value is number {
 	return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+function isChangeSummary(value: unknown): boolean {
+	if (!isRecord(value) || Object.keys(value).length !== 4) return false;
+	return ["added", "updated", "deleted", "conflicts"].every((key) => isGeneration(value[key]));
 }
 
 function isSize(value: unknown): value is number {

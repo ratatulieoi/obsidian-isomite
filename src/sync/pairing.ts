@@ -1,5 +1,5 @@
 const PAIRING_FORMAT = "isomite-pairing-v3" as const;
-const PAIRING_PREFIX = `${PAIRING_FORMAT}.`;
+const LEGACY_PAIRING_PREFIX = `${PAIRING_FORMAT}.`;
 const MAX_PAIRING_CODE_LENGTH = 32_768;
 
 export type PairingEncryption =
@@ -23,7 +23,7 @@ export interface PairingPayload {
 export function createPairingCode(payload: Omit<PairingPayload, "format">): string {
 	const completePayload: PairingPayload = { format: PAIRING_FORMAT, ...payload };
 	assertPayload(completePayload);
-	return `${PAIRING_PREFIX}${toBase64Url(new TextEncoder().encode(JSON.stringify(completePayload)))}`;
+	return toBase64Url(new TextEncoder().encode(JSON.stringify(completePayload)));
 }
 
 export function parsePairingCode(code: string): PairingPayload {
@@ -31,14 +31,13 @@ export function parsePairingCode(code: string): PairingPayload {
 	if (!normalized || normalized.length > MAX_PAIRING_CODE_LENGTH) {
 		throw new Error("The Isomite pairing code is invalid.");
 	}
-	if (!normalized.startsWith(PAIRING_PREFIX)) {
-		throw new Error("This pairing code is obsolete. Create a new pairing code on an updated Isomite device.");
-	}
-
+	const encoded = normalized.startsWith(LEGACY_PAIRING_PREFIX)
+		? normalized.slice(LEGACY_PAIRING_PREFIX.length)
+		: normalized;
 	let value: unknown;
 	try {
 		value = JSON.parse(
-			new TextDecoder("utf-8", { fatal: true }).decode(fromBase64Url(normalized.slice(PAIRING_PREFIX.length)))
+			new TextDecoder("utf-8", { fatal: true }).decode(fromBase64Url(encoded))
 		) as unknown;
 	} catch {
 		throw new Error("The Isomite pairing code is invalid.");

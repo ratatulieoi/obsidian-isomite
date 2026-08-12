@@ -24,11 +24,11 @@ export class SyncReviewModal extends Modal {
 	}
 
 	onOpen(): void {
-		this.titleEl.setText("Review Isomite sync");
+		this.titleEl.setText("Confirm sync changes");
 		const changed = this.plan.entries.filter((entry) => entry.action !== "noop");
 		const totalChanges = changed.length + (this.plan.ignoreRulesChanged ? 1 : 0);
 		this.contentEl.createEl("p", {
-			text: `${totalChanges} change${totalChanges === 1 ? "" : "s"}. Nothing happens until you apply the complete plan.`,
+			text: `${totalChanges} change${totalChanges === 1 ? "" : "s"}. Check the list, then confirm to sync everything together.`,
 		});
 		if (this.plan.ignoreRulesChanged) {
 			this.contentEl.createEl("p", { text: "Global ignore rules will also be updated for every paired device." });
@@ -45,7 +45,7 @@ export class SyncReviewModal extends Modal {
 			button.onClick(() => this.finish(false));
 		});
 		controls.addButton((button) => {
-			button.setButtonText("Apply complete plan").setCta();
+			button.setButtonText("Confirm and sync").setCta();
 			button.onClick(() => {
 				const unresolved = changed.find(
 					(entry) => entry.action === "chooseDeleteOrEdit" && !this.decisions.has(entry.path)

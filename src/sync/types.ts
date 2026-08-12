@@ -28,6 +28,13 @@ export interface RemoteRevisionFile {
 	size: number;
 }
 
+export interface RevisionChangeSummary {
+	added: number;
+	updated: number;
+	deleted: number;
+	conflicts: number;
+}
+
 export interface RemoteRevision {
 	format: typeof REMOTE_REVISION_FORMAT;
 	vaultId: string;
@@ -36,6 +43,10 @@ export interface RemoteRevision {
 	generation: number;
 	createdAt: string;
 	deviceId: string;
+	/** User-facing device name. Older revisions may not contain it. */
+	deviceName?: string;
+	/** User-facing summary. Older revisions may not contain it. */
+	changes?: RevisionChangeSummary;
 	files: RemoteRevisionFile[];
 	ignorePatterns: string[];
 }

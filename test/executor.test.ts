@@ -63,6 +63,7 @@ describe("prepareSync", () => {
 			keys,
 			vaultId: "vault-12345678",
 			deviceId: "device-12345678",
+			deviceName: "Test laptop",
 			remoteFiles: [],
 			remoteIgnorePatterns: [],
 			ignorePatterns: [],
@@ -72,6 +73,8 @@ describe("prepareSync", () => {
 		});
 
 		expect(prepared.revision?.generation).toBe(1);
+		expect(prepared.revision?.deviceName).toBe("Test laptop");
+		expect(prepared.revision?.changes).toEqual({ added: 1, updated: 0, deleted: 0, conflicts: 0 });
 		expect(prepared.revision?.files).toEqual([{ path: "Note.md", contentHash: "ab".repeat(32), size: 4 }]);
 		expect(prepared.journal.operations).toEqual([]);
 		expect(store.uploads).toHaveLength(1);
@@ -97,6 +100,7 @@ describe("prepareSync", () => {
 			keys,
 			vaultId: "vault-12345678",
 			deviceId: "device-12345678",
+			deviceName: "Test laptop",
 			remoteFiles: [],
 			remoteIgnorePatterns: [],
 			ignorePatterns: [],
@@ -141,6 +145,7 @@ describe("prepareSync", () => {
 				keys,
 				vaultId: remoteHead.head.vaultId,
 				deviceId: "device-12345678",
+				deviceName: "Test laptop",
 				remoteFiles: [remote],
 				remoteIgnorePatterns: [],
 				remoteHead,

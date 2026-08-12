@@ -22,6 +22,8 @@ function revision(): RemoteRevision {
 		generation: 1,
 		createdAt: "2026-08-01T12:00:00.000Z",
 		deviceId: "device-12345678",
+		deviceName: "Work laptop",
+		changes: { added: 1, updated: 1, deleted: 0, conflicts: 0 },
 		files: [
 			{ path: "Z.md", contentHash: HASH.toUpperCase(), size: 10 },
 			{ path: "A.md", contentHash: HASH, size: 5 },
@@ -37,6 +39,8 @@ describe("encrypted remote revision format", () => {
 		const decoded = await decodeRemoteRevision(keys, encrypted);
 
 		expect(new TextDecoder().decode(encrypted)).not.toContain("A.md");
+		expect(decoded.deviceName).toBe("Work laptop");
+		expect(decoded.changes).toEqual({ added: 1, updated: 1, deleted: 0, conflicts: 0 });
 		expect(decoded.files.map((file) => file.path)).toEqual(["A.md", "Z.md"]);
 		expect(decoded.files.every((file) => file.contentHash === HASH)).toBe(true);
 		expect(decoded.ignorePatterns).toEqual(["cache/**", "tmp/**"]);
