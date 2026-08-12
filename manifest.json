@@ -1,7 +1,7 @@
 {
   "id": "isomite",
   "name": "Isomite",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "minAppVersion": "1.13.0",
   "description": "Connect your vault to a private Cloudflare R2 bucket for controlled synchronization.",
   "author": "Anggris",
