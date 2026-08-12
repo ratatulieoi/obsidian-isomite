@@ -51,7 +51,6 @@ export class IsomiteSettingTab extends PluginSettingTab {
 
 	getSettingDefinitions(): SettingDefinitionItem[] {
 		let pairingCode = "";
-		let pairingPassword = "";
 		return [
 			{
 				type: "group",
@@ -59,7 +58,7 @@ export class IsomiteSettingTab extends PluginSettingTab {
 				items: [
 					{
 						name: "This device",
-						desc: "Set up a bucket directly, or import an encrypted pairing bundle from another Isomite device.",
+						desc: "Set up a bucket directly, or import a secret pairing code from another Isomite device.",
 						control: {
 							type: "dropdown",
 							key: "setupMode",
@@ -77,37 +76,26 @@ export class IsomiteSettingTab extends PluginSettingTab {
 				visible: () => this.plugin.settings.setupMode === "pair",
 				items: [
 					{
-						name: "Encrypted pairing bundle",
-						desc: "Paste the bundle copied from a connected Isomite device. It carries the R2 destination, credentials, and encryption access inside one encrypted code.",
+						name: "Pairing code",
+						desc: "Paste the secret pairing code copied from a connected Isomite device. Anyone with this code can access the synchronized vault.",
 						render: (setting) => {
 							setting.addTextArea((text) => {
-								text.setPlaceholder("Paste encrypted pairing bundle");
+								text.setPlaceholder("Paste secret pairing code");
 								text.onChange((value) => (pairingCode = value.trim()));
 							});
 						},
 					},
 					{
-						name: "One-time pairing password",
-						desc: "Enter the 16-character-or-longer password supplied separately by the connected device.",
-						render: (setting) => {
-							setting.addText((text) => {
-								text.inputEl.type = "password";
-								text.setPlaceholder("One-time pairing password");
-								text.onChange((value) => (pairingPassword = value));
-							});
-						},
-					},
-					{
-						name: "Import pairing bundle",
-						desc: "Decrypt the bundle, verify its R2 vault identity, and configure this device.",
+						name: "Import pairing code",
+						desc: "Verify the code against its existing R2 vault and configure this device.",
 						render: (setting) => {
 							setting.addButton((button) => {
 								button.setButtonText("Import and connect").setCta();
 								button.onClick(async () => {
 									button.setDisabled(true).setButtonText("Importing…");
 									try {
-										await this.plugin.importPairingCode(pairingCode, pairingPassword);
-										new Notice("Pairing bundle imported and verified. Review sync to download the vault.");
+										await this.plugin.importPairingCode(pairingCode);
+										new Notice("Pairing code imported and verified. Review sync to download the vault.");
 										this.update();
 									} catch (error) {
 										new Notice(`Pairing import failed: ${errorText(error)}`);
@@ -306,28 +294,21 @@ export class IsomiteSettingTab extends PluginSettingTab {
 				items: [
 					{
 						name: "Pair another device",
-						desc: "Create an encrypted bundle containing the R2 destination, credentials, and encryption access. Send its one-time password separately.",
+						desc: "Copy a complete pairing code. Keep it secret and store it somewhere safe; anyone with the code can access this synchronized vault.",
 						aliases: ["pairing code", "new device"],
 						visible: () => Boolean(this.plugin.settings.vaultId && this.plugin.settings.encryptedSyncBaseline),
 						render: (setting) => {
-							let pairingPassword = "";
-							setting
-								.addText((text) => {
-									text.inputEl.type = "password";
-									text.setPlaceholder("One-time password, 16+ characters");
-									text.onChange((value) => (pairingPassword = value));
-								})
-								.addButton((button) => {
-									button.setButtonText("Copy encrypted bundle");
-									button.onClick(async () => {
-										try {
-											await this.plugin.copyPairingCode(pairingPassword);
-											new Notice("Encrypted pairing bundle copied. Send the one-time password separately.");
-										} catch (error) {
-											new Notice(`Pairing export failed: ${errorText(error)}`);
-										}
-									});
+							setting.addButton((button) => {
+								button.setButtonText("Copy pairing code");
+								button.onClick(async () => {
+									try {
+										await this.plugin.copyPairingCode();
+										new Notice("Pairing code copied. Keep it secret and store it somewhere safe.", 10_000);
+									} catch (error) {
+										new Notice(`Pairing export failed: ${errorText(error)}`);
+									}
 								});
+							});
 						},
 					},
 					{

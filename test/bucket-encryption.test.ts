@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { initializeOrVerifyEncryption, PassphraseMismatchError } from "../src/crypto/bucket-encryption";
+import { initializeOrVerifyEncryption, PassphraseMismatchError, verifyPassphrase } from "../src/crypto/bucket-encryption";
 import { R2Client, R2Transport, R2TransportResponse } from "../src/r2/r2-client";
 
 const credentials = {
@@ -60,6 +60,24 @@ describe("bucket encryption metadata", () => {
 		await client.putObject("unrelated.txt", new TextEncoder().encode("data"));
 
 		await expect(initializeOrVerifyEncryption(client, "correct passphrase")).rejects.toThrow("dedicated empty bucket");
+		expect(bucket.keys()).toEqual(["unrelated.txt"]);
+	});
+
+	it("verifies a pairing passphrase without writing", async () => {
+		const bucket = new MemoryR2();
+		const client = new R2Client(credentials, bucket.transport);
+		await initializeOrVerifyEncryption(client, "correct passphrase");
+
+		await expect(verifyPassphrase(client, "correct passphrase")).resolves.toBeDefined();
+		expect(bucket.keys()).toEqual(["_isomite/encryption-v1.json"]);
+	});
+
+	it("never initializes a bucket while verifying a pairing passphrase", async () => {
+		const bucket = new MemoryR2();
+		const client = new R2Client(credentials, bucket.transport);
+		await client.putObject("unrelated.txt", new TextEncoder().encode("data"));
+
+		await expect(verifyPassphrase(client, "correct passphrase")).rejects.toThrow("does not contain initialized");
 		expect(bucket.keys()).toEqual(["unrelated.txt"]);
 	});
 

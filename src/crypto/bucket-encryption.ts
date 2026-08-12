@@ -44,6 +44,15 @@ export async function initializeOrVerifyEncryption(client: R2Client, passphrase:
 	return keys;
 }
 
+export async function verifyPassphrase(client: R2Client, passphrase: string): Promise<DerivedKeys> {
+	if (!passphrase) throw new Error("The pairing code does not contain an encryption passphrase.");
+	const meta = await readEncryptionMeta(client);
+	if (!meta?.value.keyCheck) throw new Error("The bucket does not contain initialized Isomite encryption metadata.");
+	const keys = await deriveKeys(passphrase, meta.value.saltBase64);
+	await assertKeyCheck(keys, meta.value.keyCheck);
+	return keys;
+}
+
 export async function verifyRecoveryKey(client: R2Client, keys: DerivedKeys): Promise<void> {
 	const meta = await readEncryptionMeta(client);
 	if (!meta?.value.keyCheck) throw new Error("Initialize bucket encryption with a passphrase first.");

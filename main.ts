@@ -6,6 +6,7 @@ import {
 } from "./src/crypto/crypto";
 import {
 	initializeOrVerifyEncryption,
+	verifyPassphrase,
 	verifyRecoveryKey,
 } from "./src/crypto/bucket-encryption";
 import { obsidianR2Transport } from "./src/r2/obsidian-request";
@@ -76,7 +77,7 @@ export default class IsomitePlugin extends Plugin {
 		await navigator.clipboard.writeText(await exportRecoveryKey(this.cachedEncryptionKeys));
 	}
 
-	async copyPairingCode(pairingPassword: string): Promise<void> {
+	async copyPairingCode(): Promise<void> {
 		if (!this.settings.vaultId || !this.settings.encryptedSyncBaseline) {
 			throw new Error("Complete the first sync before pairing another device.");
 		}
@@ -87,25 +88,22 @@ export default class IsomitePlugin extends Plugin {
 		const encryption = this.settings.importedRecoveryKey
 			? { type: "recoveryKey" as const, value: this.settings.importedRecoveryKey }
 			: { type: "passphrase" as const, value: this.settings.passphrase };
-		const pairingCode = await createPairingCode(
-			{
-				vaultId: this.settings.vaultId,
-				endpoint: this.settings.endpoint,
-				bucket: this.settings.bucket,
-				accessKeyId: this.settings.accessKeyId,
-				secretAccessKey: this.settings.secretAccessKey,
-				encryption,
-			},
-			pairingPassword
-		);
+		const pairingCode = createPairingCode({
+			vaultId: this.settings.vaultId,
+			endpoint: this.settings.endpoint,
+			bucket: this.settings.bucket,
+			accessKeyId: this.settings.accessKeyId,
+			secretAccessKey: this.settings.secretAccessKey,
+			encryption,
+		});
 		await navigator.clipboard.writeText(pairingCode);
 	}
 
-	async importPairingCode(value: string, pairingPassword: string): Promise<void> {
+	async importPairingCode(value: string): Promise<void> {
 		if (this.settings.encryptedSyncBaseline || this.settings.encryptedSyncJournal) {
-			throw new Error("This device already has sync state and cannot import a pairing bundle.");
+			throw new Error("This device already has sync state and cannot import a pairing code.");
 		}
-		const pairing = await parsePairingCode(value, pairingPassword);
+		const pairing = parsePairingCode(value);
 		const previous = { ...this.settings };
 		this.settings.endpoint = pairing.endpoint;
 		this.settings.bucket = pairing.bucket;
@@ -118,12 +116,18 @@ export default class IsomitePlugin extends Plugin {
 		try {
 			const connection = await this.testR2Connection();
 			if (connection.objectCount === 0) throw new Error("The pairing bucket is empty.");
-			await this.initializeOrVerifyEncryption();
-			const keys = this.cachedEncryptionKeys;
-			if (!keys) throw new Error("Encryption keys are not available.");
+			const client = this.createR2Client();
+			let keys: DerivedKeys;
+			if (pairing.encryption.type === "recoveryKey") {
+				keys = await importRecoveryKey(pairing.encryption.value);
+				await verifyRecoveryKey(client, keys);
+			} else {
+				keys = await verifyPassphrase(client, pairing.encryption.value);
+			}
+			this.cachedEncryptionKeys = keys;
 			const remoteHead = await new RevisionStore(this.createR2Client(), keys).readHead();
 			if (!remoteHead || remoteHead.head.vaultId !== pairing.vaultId) {
-				throw new Error("The pairing bundle does not match the Isomite vault in R2.");
+				throw new Error("The pairing code does not match the Isomite vault in R2.");
 			}
 			this.settings.setupMode = "initialize";
 			await this.saveSettings();
@@ -149,7 +153,7 @@ export default class IsomitePlugin extends Plugin {
 
 	async reviewAndSync(automatic = false): Promise<void> {
 		if (this.settings.setupMode === "pair") {
-			if (!automatic) new Notice("Import an encrypted pairing bundle before reviewing sync.");
+			if (!automatic) new Notice("Import a pairing code before reviewing sync.");
 			return;
 		}
 		if (this.syncBusy) {
@@ -194,7 +198,7 @@ export default class IsomitePlugin extends Plugin {
 				if (this.settings.vaultId === remoteHead.head.vaultId) {
 					adoptEstablishedRemote = true;
 				} else {
-					throw new Error("Choose “Pair to existing Isomite vault” and import its encrypted pairing bundle.");
+					throw new Error("Choose “Pair to existing Isomite vault” and import its pairing code.");
 				}
 			}
 			if (!remoteHead) {

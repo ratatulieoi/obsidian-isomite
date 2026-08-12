@@ -20,7 +20,7 @@ Isomite is an Obsidian plugin for controlled vault synchronization through a pri
 - Review every proposed change before applying the complete plan.
 - Store encrypted immutable revisions and deduplicated encrypted file blobs.
 - Preserve deletion history and recover interrupted local application with an encrypted journal.
-- Pair additional devices with one encrypted bundle containing the R2 connection and encryption access, protected by a separate one-time password.
+- Pair additional devices with one generated secret code containing everything needed to connect.
 
 ## Install
 
@@ -57,13 +57,13 @@ A bucket URL ending in `/<bucket>` is also accepted. Isomite immediately separat
 
 ## Pair another device
 
-1. On a synced device, enter a new one-time password under **Pair another device** and copy the encrypted bundle.
-2. Send the bundle and its one-time password through separate channels.
+1. On a synced device, select **Copy pairing code** under **Pair another device**.
+2. Keep the code secret and store it somewhere safe. Anyone with it can access the synchronized vault.
 3. On the new device, choose **Pair to existing Isomite vault** at the top of Isomite settings. The other settings collapse.
-4. Paste the bundle and one-time password, then select **Import and connect**.
+4. Paste the code, then select **Import and connect**.
 5. Select **Review sync** and approve the download.
 
-The bundle contains R2 credentials and encryption access, but those values are encrypted with AES-256-GCM and a key derived from the one-time password. Anyone who obtains both can access the R2 vault, so treat them as secrets and use a fresh password for every device.
+The pairing code contains the R2 credentials and encryption access. It is a bearer secret, similar to a recovery key: do not post it publicly, leave it in shared clipboard history, or send it through an untrusted channel.
 
 ## Network use and privacy
 
