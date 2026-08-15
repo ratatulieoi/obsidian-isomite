@@ -23,6 +23,7 @@ import { createPairingCode, parsePairingCode } from "./src/sync/pairing";
 import { createVaultZipBackup } from "./src/sync/backup";
 import { SyncCancelledError, SyncProgress } from "./src/sync/progress";
 import { SyncHistoryModal } from "./src/sync/history-modal";
+import { errorMessage } from "./src/util/error";
 
 export default class IsomitePlugin extends Plugin {
 	settings: IsomiteSettings = { ...DEFAULT_SETTINGS };
@@ -296,10 +297,30 @@ export default class IsomitePlugin extends Plugin {
 			if (this.syncAbortController.signal.aborted) throw new SyncCancelledError();
 			this.updateSyncProgress({ percent: 30, stage: "Sync plan ready" });
 			const changes = planned.plan.entries.filter((entry) => entry.action !== "noop");
+			if (planned.plan.rebuildingSyncState) {
+				new Notice("This device's saved sync state did not match R2. Isomite safely compared both sides again.", 10_000);
+			}
 			const ignoreRulesChanged = requestedIgnorePatterns !== undefined &&
 				JSON.stringify([...requestedIgnorePatterns].sort()) !== JSON.stringify([...planned.remoteIgnorePatterns].sort());
 			planned.plan.ignoreRulesChanged = ignoreRulesChanged;
 			if (!changes.length && !ignoreRulesChanged) {
+				if (planned.plan.rebuildingSyncState && planned.remoteHead) {
+					const repairedBaseline = {
+						format: "isomite-sync-baseline-v1" as const,
+						vaultId: planned.remoteHead.head.vaultId,
+						revisionId: planned.remoteHead.head.revisionId,
+						generation: planned.remoteHead.head.generation,
+						files: await Promise.all(planned.remoteFiles.map(async (file) => ({
+							...file,
+							mtime: (await vault.stat(file.path))?.mtime,
+						}))),
+					};
+					this.settings.encryptedSyncBaseline = await encodeLocalBaseline(keys, repairedBaseline);
+					this.settings.vaultId = repairedBaseline.vaultId;
+					await this.saveSettings();
+					this.finishSyncProgress("Isomite repaired this device's sync state. Your vault is up to date.");
+					return;
+				}
 				this.finishSyncProgress("Isomite is up to date.");
 				return;
 			}
@@ -366,7 +387,7 @@ export default class IsomitePlugin extends Plugin {
 			if (error instanceof SyncCancelledError) {
 				this.finishSyncProgress("Isomite sync cancelled before commit. No changes were applied.");
 			} else {
-				this.finishSyncProgress(`Isomite sync failed: ${String(error)}`, 10_000);
+				this.finishSyncProgress(`Isomite sync failed: ${errorMessage(error)}`, 10_000);
 			}
 		} finally {
 			this.syncBusy = false;

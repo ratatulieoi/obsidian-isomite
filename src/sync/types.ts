@@ -115,6 +115,8 @@ export interface SyncPlan {
 	remoteRevisionId: string | null;
 	entries: SyncPlanEntry[];
 	ignoreRulesChanged?: boolean;
+	/** This device's saved checkpoint disagreed with R2, so both sides were compared from scratch. */
+	rebuildingSyncState?: boolean;
 }
 
 export const SYNC_JOURNAL_FORMAT = "isomite-sync-journal-v1" as const;

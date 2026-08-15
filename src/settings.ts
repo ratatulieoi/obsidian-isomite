@@ -2,6 +2,7 @@ import { App, Notice, PluginSettingTab, SettingDefinitionItem } from "obsidian";
 import type IsomitePlugin from "../main";
 import { parseR2Endpoint } from "./r2/endpoint";
 import { validateIgnorePatterns } from "./sync/ignore";
+import { errorMessage } from "./util/error";
 
 export type SetupMode = "initialize" | "pair";
 
@@ -486,5 +487,5 @@ function encryptionStatusDescription(status: "missing" | "unverified" | "encrypt
 }
 
 function errorText(error: unknown): string {
-	return String(error);
+	return errorMessage(error);
 }

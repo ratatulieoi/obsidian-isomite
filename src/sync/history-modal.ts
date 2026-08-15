@@ -1,5 +1,6 @@
 import { App, Modal } from "obsidian";
 import { RevisionStore } from "./revision-store";
+import { errorMessage } from "../util/error";
 import { RemoteHead, RemoteRevision, RevisionChangeSummary } from "./types";
 
 export class SyncHistoryModal extends Modal {
@@ -30,7 +31,7 @@ export class SyncHistoryModal extends Modal {
 			this.renderHistory(revisions);
 		} catch (error) {
 			this.contentEl.empty();
-			this.contentEl.createEl("p", { text: `Could not load sync history: ${String(error)}` });
+			this.contentEl.createEl("p", { text: `Could not load sync history: ${errorMessage(error)}` });
 		}
 	}
 

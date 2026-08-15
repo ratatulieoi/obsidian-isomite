@@ -5,7 +5,7 @@ import { RevisionStore, StoredHead } from "./revision-store";
 import { scanLocalFiles } from "./scanner";
 import { SyncBaseline, SyncPlan } from "./types";
 import { SyncVaultAdapter } from "./vault-adapter";
-import { assertRemoteDidNotRollback, assertRemoteIdentity } from "./guards";
+import { assertRemoteDidNotRollback, assertRemoteIdentity, RemoteRollbackError } from "./guards";
 import { isIgnoredPath } from "./ignore";
 import { SyncProgressCallback } from "./progress";
 
@@ -35,7 +35,18 @@ export interface CreatePlanInput {
 export async function createSyncPlan(input: CreatePlanInput): Promise<PlannedSync> {
 	const remoteHead = await input.store.readHead();
 	assertRemoteIdentity(input.localVaultId, remoteHead?.head);
-	assertRemoteDidNotRollback(input.baseline, remoteHead?.head);
+	let baseline = input.baseline;
+	let rebuildingSyncState = false;
+	try {
+		assertRemoteDidNotRollback(baseline, remoteHead?.head);
+	} catch (error) {
+		if (!(error instanceof RemoteRollbackError) || !remoteHead) throw error;
+		// The local checkpoint can become stale after copying/restoring plugin
+		// data or restoring R2. Compare current local and remote state from
+		// scratch rather than trapping this device permanently.
+		baseline = undefined;
+		rebuildingSyncState = true;
+	}
 
 	const remoteRevision = remoteHead ? await input.store.readRevision(remoteHead.head.revisionId) : undefined;
 	if (remoteHead && remoteRevision?.vaultId !== remoteHead.head.vaultId) {
@@ -46,7 +57,7 @@ export async function createSyncPlan(input: CreatePlanInput): Promise<PlannedSyn
 	const localFiles = await scanLocalFiles(
 		input.vault,
 		input.keys,
-		input.baseline,
+		baseline,
 		ignorePatterns,
 		input.onProgress,
 		input.signal
@@ -55,7 +66,7 @@ export async function createSyncPlan(input: CreatePlanInput): Promise<PlannedSyn
 		.filter((file) => isIgnoredPath(file.path, ignorePatterns, input.configDir))
 		.map((file) => file.path);
 	let plan = buildSyncPlan({
-		baseline: input.baseline,
+		baseline,
 		localFiles,
 		remoteFiles: remoteRevision?.files ?? [],
 		remoteRevisionId: remoteHead?.head.revisionId ?? null,
@@ -66,6 +77,7 @@ export async function createSyncPlan(input: CreatePlanInput): Promise<PlannedSyn
 	if (input.readBase) {
 		plan = await resolvePlanMerges(plan, input.vault, input.store, input.readBase);
 	}
+	plan.rebuildingSyncState = rebuildingSyncState;
 	return {
 		plan,
 		remoteHead,

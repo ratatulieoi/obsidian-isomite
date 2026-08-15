@@ -30,6 +30,11 @@ export class SyncReviewModal extends Modal {
 		this.contentEl.createEl("p", {
 			text: `${totalChanges} change${totalChanges === 1 ? "" : "s"}. Check the list, then confirm to sync everything together.`,
 		});
+		if (this.plan.rebuildingSyncState) {
+			this.contentEl.createEl("p", {
+				text: "This device's saved sync state did not match R2. Isomite compared both sides again and will keep both versions where needed.",
+			});
+		}
 		if (this.plan.ignoreRulesChanged) {
 			this.contentEl.createEl("p", { text: "Global ignore rules will also be updated for every paired device." });
 		}
