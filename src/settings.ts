@@ -2,7 +2,7 @@ import { App, Notice, PluginSettingTab, SettingDefinitionItem } from "obsidian";
 import type IsomitePlugin from "../main";
 import { parseR2Endpoint } from "./r2/endpoint";
 import { validateIgnorePatterns } from "./sync/ignore";
-import { errorMessage } from "./util/error";
+import { errorMessage, userErrorMessage } from "./util/error";
 
 export type SetupMode = "initialize" | "pair";
 
@@ -103,7 +103,7 @@ export class IsomiteSettingTab extends PluginSettingTab {
 										new Notice("Pairing code imported and verified. Name this device, then select Sync to download the vault.");
 										this.update();
 									} catch (error) {
-										new Notice(`Pairing import failed: ${errorText(error)}`);
+										new Notice(userErrorMessage("pairing-import", error), 10_000);
 									} finally {
 										button.setDisabled(false).setButtonText("Import and connect");
 									}
@@ -181,7 +181,7 @@ export class IsomiteSettingTab extends PluginSettingTab {
 										const result = await this.plugin.testR2Connection();
 										new Notice(`Connected to R2. Bucket contains ${result.objectCount} object${result.objectCount === 1 ? "" : "s"}.`);
 									} catch (error) {
-										new Notice(`R2 connection failed: ${errorText(error)}`);
+										new Notice(userErrorMessage("connection", error), 10_000);
 									} finally {
 										button.setDisabled(false).setButtonText("Test connection");
 									}
@@ -232,7 +232,7 @@ export class IsomiteSettingTab extends PluginSettingTab {
 										new Notice("Vault is encrypted and ready to sync.");
 										this.update();
 									} catch (error) {
-										new Notice(`Encryption verification failed: ${errorText(error)}`);
+										new Notice(userErrorMessage("encryption", error), 10_000);
 									} finally {
 										button.setDisabled(false).setButtonText("Verify encryption");
 									}
@@ -252,7 +252,7 @@ export class IsomiteSettingTab extends PluginSettingTab {
 										await this.plugin.copyRecoveryKey();
 										new Notice("Recovery key copied. Store it safely outside the vault.");
 									} catch (error) {
-										new Notice(`Recovery-key export failed: ${errorText(error)}`);
+										new Notice(userErrorMessage("recovery-export", error), 10_000);
 									}
 								});
 							});
@@ -295,7 +295,7 @@ export class IsomiteSettingTab extends PluginSettingTab {
 											new Notice("Recovery key imported and verified.");
 											this.update();
 										} catch (error) {
-											new Notice(`Recovery-key import failed: ${errorText(error)}`);
+											new Notice(userErrorMessage("recovery-import", error), 10_000);
 										}
 									});
 								});
@@ -326,7 +326,7 @@ export class IsomiteSettingTab extends PluginSettingTab {
 										await this.plugin.copyPairingCode();
 										new Notice("Pairing code copied. Keep it secret and store it somewhere safe.", 10_000);
 									} catch (error) {
-										new Notice(`Pairing export failed: ${errorText(error)}`);
+										new Notice(userErrorMessage("pairing-export", error), 10_000);
 									}
 								});
 							});
@@ -361,7 +361,7 @@ export class IsomiteSettingTab extends PluginSettingTab {
 									try {
 										await this.plugin.openSyncHistory();
 									} catch (error) {
-										new Notice(`Sync history failed: ${errorText(error)}`);
+										new Notice(userErrorMessage("history", error), 10_000);
 									} finally {
 										button.setDisabled(!this.plugin.isSyncReady()).setButtonText("View history");
 									}

@@ -23,7 +23,7 @@ import { createPairingCode, parsePairingCode } from "./src/sync/pairing";
 import { createVaultZipBackup } from "./src/sync/backup";
 import { SyncCancelledError, SyncProgress } from "./src/sync/progress";
 import { SyncHistoryModal } from "./src/sync/history-modal";
-import { errorMessage } from "./src/util/error";
+import { userErrorMessage, UserErrorContext } from "./src/util/error";
 
 export default class IsomitePlugin extends Plugin {
 	settings: IsomiteSettings = { ...DEFAULT_SETTINGS };
@@ -387,7 +387,12 @@ export default class IsomitePlugin extends Plugin {
 			if (error instanceof SyncCancelledError) {
 				this.finishSyncProgress("Isomite sync cancelled before commit. No changes were applied.");
 			} else {
-				this.finishSyncProgress(`Isomite sync failed: ${errorMessage(error)}`, 10_000);
+				const context: UserErrorContext = this.syncCanCancel
+					? "sync"
+					: this.settings.encryptedSyncJournal
+						? "sync-after-commit"
+						: "sync-commit";
+				this.finishSyncProgress(userErrorMessage(context, error), 12_000);
 			}
 		} finally {
 			this.syncBusy = false;
