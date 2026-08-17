@@ -16,10 +16,16 @@ interface StoredObject {
 	etag: string;
 }
 
-function memoryTransport(): { objects: Map<string, StoredObject>; transport: R2Transport } {
+function memoryTransport(): {
+	objects: Map<string, StoredObject>;
+	requests: Array<{ url: string; init: Parameters<R2Transport>[1] }>;
+	transport: R2Transport;
+} {
 	const objects = new Map<string, StoredObject>();
+	const requests: Array<{ url: string; init: Parameters<R2Transport>[1] }> = [];
 	let etagSequence = 0;
 	const transport: R2Transport = async (url, init) => {
+		requests.push({ url, init });
 		const key = decodeURIComponent(new URL(url).pathname.replace(/^\/vault\/?/, ""));
 		const existing = objects.get(key);
 		if (init.method === "GET") {
@@ -35,7 +41,7 @@ function memoryTransport(): { objects: Map<string, StoredObject>; transport: R2T
 		}
 		return response(405);
 	};
-	return { objects, transport };
+	return { objects, requests, transport };
 }
 
 function response(status: number, body: Uint8Array = new Uint8Array(), headers: Record<string, string> = {}) {
@@ -82,6 +88,10 @@ describe("RevisionStore", () => {
 
 		expect(committed.head.revisionId).toBe(first.revisionId);
 		expect((await store.readHead())?.head).toEqual(committed.head);
+		const headPut = [...memory.requests].reverse().find((request) =>
+			request.init.method === "PUT" && new URL(request.url).pathname.endsWith("/_isomite/head-v1")
+		);
+		expect(headPut?.init.headers["cache-control"]).toBe("no-store");
 		expect(await store.readRevision(first.revisionId)).toEqual(first);
 	});
 

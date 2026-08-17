@@ -152,6 +152,7 @@ export class RevisionStore {
 		try {
 			const result = await this.client.putObject(remoteHeadObjectKey(), await encodeRemoteHead(this.keys, head), {
 				contentType: "application/octet-stream",
+				cacheControl: "no-store",
 				...(expectedHead ? { ifMatch: expectedHead.etag } : { ifNoneMatch: "*" as const }),
 			});
 			return { head, etag: result.etag };

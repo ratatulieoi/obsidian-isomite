@@ -47,6 +47,7 @@ export interface R2ListResult {
 
 export interface R2PutOptions {
 	contentType?: string;
+	cacheControl?: string;
 	ifMatch?: string;
 	ifNoneMatch?: "*";
 }
@@ -99,7 +100,14 @@ export class R2Client {
 	}
 
 	async getObject(key: string): Promise<R2GetResult> {
-		const response = await this.signedRequest({ method: "GET", key });
+		// The current-head object is overwritten in place. Explicit no-cache
+		// request headers prevent Obsidian, a platform HTTP cache, or an
+		// intermediary from returning an older successful GET after a commit.
+		const response = await this.signedRequest({
+			method: "GET",
+			key,
+			headers: { "cache-control": "no-cache, no-store", pragma: "no-cache" },
+		});
 		if (response.status === 404) throw new R2NotFoundError(key);
 		assertSuccess(`GET ${key}`, response);
 		return {
@@ -111,6 +119,7 @@ export class R2Client {
 	async putObject(key: string, body: Uint8Array, options: R2PutOptions = {}): Promise<R2PutResult> {
 		const headers: Record<string, string> = {};
 		if (options.contentType) headers["content-type"] = options.contentType;
+		if (options.cacheControl) headers["cache-control"] = options.cacheControl;
 		if (options.ifMatch) headers["if-match"] = options.ifMatch;
 		if (options.ifNoneMatch) headers["if-none-match"] = options.ifNoneMatch;
 

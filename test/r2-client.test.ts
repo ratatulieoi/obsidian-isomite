@@ -37,6 +37,22 @@ describe("R2Client", () => {
 		expect(capturedInit?.body).toBeUndefined();
 	});
 
+	it("bypasses caches when reading mutable R2 objects", async () => {
+		let capturedInit: Parameters<R2Transport>[1] | undefined;
+		const transport: R2Transport = async (_url, init) => {
+			capturedInit = init;
+			return response(200, "object", { etag: '"etag-1"' });
+		};
+
+		await new R2Client(credentials, transport).getObject("_isomite/head-v1");
+
+		expect(capturedInit?.headers["cache-control"]).toBe("no-cache, no-store");
+		expect(capturedInit?.headers.pragma).toBe("no-cache");
+		expect(capturedInit?.headers.authorization).toContain(
+			"SignedHeaders=cache-control;host;pragma;x-amz-content-sha256;x-amz-date"
+		);
+	});
+
 	it("surfaces Cloudflare's XML error code and message", async () => {
 		const transport: R2Transport = async () =>
 			response(403, "<Error><Code>AccessDenied</Code><Message>Access denied</Message></Error>");
