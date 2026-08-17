@@ -1,93 +1,162 @@
-# Isomite
+# Isomite: encrypted Obsidian sync with Cloudflare R2
 
-Isomite is an Obsidian plugin for controlled vault synchronization through a private [Cloudflare R2](https://developers.cloudflare.com/r2/) bucket. It connects directly from Obsidian to R2 without a VPS, Worker, or custom synchronization server.
+**Your notes. Your bucket. One Sync button.**
 
-> [!IMPORTANT]
-> Synchronization is new in `0.3.0`. Start with a copied test vault and a dedicated empty R2 bucket, and keep an independent backup while evaluating it.
+Isomite is a private, end-to-end encrypted **Obsidian sync plugin** that keeps a vault synchronized across desktop and mobile through your own [Cloudflare R2](https://developers.cloudflare.com/r2/) bucket.
 
-## Current features
+Obsidian connects directly to R2. There is no VPS to maintain, no Worker to deploy, no Isomite account, and no developer-operated sync server. If you want an Obsidian Sync alternative with storage in your own Cloudflare account, but do not want to run a self-hosted server, this is what Isomite is built for.
 
-- Configure a Cloudflare R2 S3 API endpoint and bucket.
-- Automatically fill the bucket name when the pasted endpoint ends in `/<bucket>`.
-- Store bucket-scoped R2 credentials in the plugin's local Obsidian data.
-- Test the connection with a signed, read-only S3 `ListObjectsV2` request.
-- Initialize and verify Isomite-specific end-to-end encryption metadata.
-- Derive independent AES-256-GCM content, hidden-path, and keyed-hash keys using PBKDF2-HMAC-SHA256 with 600,000 iterations.
-- Export and import recovery keys.
-- Work on Obsidian desktop and mobile using native WebCrypto and Obsidian's `requestUrl()` API.
-- Avoid browser CORS limitations without operating a separate backend.
-- Build a complete upload/download/delete/merge plan before changing either side.
-- Review every proposed change before applying the complete plan.
-- Start sync from the Obsidian ribbon and follow persistent percentage progress without opening plugin settings.
-- Name each device and view recent encrypted sync history with simple change counts.
-- Store encrypted immutable revisions and deduplicated encrypted file blobs.
-- Preserve deletion history and recover interrupted local application with an encrypted journal.
-- Pair additional devices with one generated secret code containing everything needed to connect.
+## What you get
 
-## Install
+- **Two-way Obsidian vault sync** between desktop and mobile devices
+- **End-to-end encryption** for file contents, filenames, paths, and sync history
+- **One-button Sync** from the Obsidian ribbon
+- A clear confirmation screen before files are uploaded, downloaded, merged, or deleted
+- **Private Cloudflare R2 storage** using a bucket and API token you control
+- One reusable secret **pairing code** for connecting any of your devices
+- Named devices and a simple, encrypted **sync history**
+- Safe conflict handling, local trash for deletions, and recovery after interrupted syncs
+- No analytics, advertising, account system, or developer backend
 
-### Community Plugins
+## How Sync works
+
+Press **Sync**. Isomite then:
+
+1. Checks the latest encrypted version in R2.
+2. Scans the current vault.
+3. Compares both sides with the last successful sync.
+4. Shows exactly what will change.
+5. Applies the complete sync only after you confirm.
+6. Saves a new encrypted revision to R2.
+
+A file changed only on this device is uploaded. A file changed only on another device is downloaded. Safe text changes can be merged. When that is not safe, Isomite keeps both versions rather than silently discarding one. If deletion conflicts with an edit, you choose which one wins.
+
+If Obsidian closes after R2 has accepted a sync, Isomite remembers the unfinished local work and resumes it before starting another sync. If a device's saved checkpoint no longer matches R2, Isomite compares both sides again and repairs the checkpoint safely.
+
+## Install from Obsidian Community Plugins
 
 1. Open **Settings → Community plugins** in Obsidian.
-2. Select **Browse** and search for **Isomite**.
-3. Install and enable the plugin.
+2. Select **Browse**.
+3. Search for **Isomite**.
+4. Install and enable it.
 
 ### Manual installation
 
-1. Download `main.js` and `manifest.json` from the matching [GitHub release](https://github.com/ratatulieoi/obsidian-isomite/releases).
+1. Download `main.js` and `manifest.json` from the same [GitHub release](https://github.com/ratatulieoi/obsidian-isomite/releases).
 2. Create `<vault>/.obsidian/plugins/isomite/`.
-3. Copy both files into that directory.
+3. Copy both files into that folder.
 4. Reload Obsidian and enable **Isomite** under Community Plugins.
 
-## Set up the first device
+## Set up your first device
 
-1. Open **Settings → Isomite** and choose **Initialize or connect to bucket**.
-2. Create a dedicated private R2 bucket for the vault.
-3. Create an R2 API token scoped to that bucket with **Object Read & Write** permission.
-4. Copy the token's **Access Key ID** and **Secret Access Key** when Cloudflare displays them.
-5. Enter:
+You need a Cloudflare account, a dedicated private R2 bucket, and an R2 API token scoped to that bucket with **Object Read & Write** permission.
+
+1. Open **Settings → Isomite**.
+2. Choose **Initialize or connect to bucket**.
+3. Enter the R2 connection details:
    - **S3 API endpoint:** `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`
-   - **Bucket:** the dedicated bucket name
-   - **Access key ID**
-   - **Secret access key**
-6. Select **Test connection**.
-7. Enter a long, unique vault passphrase.
-8. Select **Verify encryption**. Sync remains disabled until the vault is encrypted and this device can unlock it.
-9. Give the device a recognizable name, select **Sync**, approve the first upload, then copy the recovery key and store it in a password manager outside the vault.
+   - **R2 bucket name**
+   - **Access Key ID**
+   - **Secret Access Key**
+4. Select **Test connection**.
+5. Enter a long, unique **vault passphrase**.
+6. Select **Verify encryption**. Sync remains disabled until this succeeds.
+7. Give the device a recognizable name, such as `Work laptop` or `Android phone`.
+8. Select **Sync**, inspect the changes, then select **Confirm and sync**.
+9. Copy the recovery key and save it in a password manager outside the vault.
 
-A bucket URL ending in `/<bucket>` is also accepted. Isomite immediately separates the endpoint and fills the **R2 bucket name** field.
+You can also paste an R2 URL ending in `/<bucket>`. Isomite separates the endpoint and bucket name automatically.
+
+> [!IMPORTANT]
+> Initialize Isomite with a dedicated empty bucket. Do not point a new Isomite vault at a bucket containing unrelated files.
 
 ## Pair another device
 
-1. On a synced device, select **Copy pairing code** under **Pair another device**.
-2. Keep the code secret and store it somewhere safe. Anyone with it can access the synchronized vault.
-3. On the new device, choose **Pair to existing Isomite vault** at the top of Isomite settings. The other settings collapse.
-4. Paste the code, then select **Import and connect**.
-5. Give the new device a recognizable name, select **Sync**, and approve the download.
+Copy your pairing code once, keep it somewhere safe, and use it to connect any of your devices. You do not need to enter the endpoint, credentials, or vault passphrase one field at a time.
 
-The pairing code contains the R2 credentials and encryption access. It is a bearer secret, similar to a recovery key: do not post it publicly, leave it in shared clipboard history, or send it through an untrusted channel.
+1. On a connected device, open **Settings → Isomite → Pair another device**.
+2. Select **Copy pairing code**.
+3. On the new device, choose **Pair to existing Isomite vault**.
+4. Paste the full code and select **Import and connect**.
+5. Name the new device, select **Sync**, and confirm the download.
 
-## Network use and privacy
+The pairing code contains the R2 connection and encryption access needed to open the vault. Treat it like a password: anyone with the code can access the synchronized vault. Keep it out of public messages, screenshots, shared clipboard history, and the vault itself.
 
-Isomite makes direct HTTPS requests only to the Cloudflare R2 S3 API endpoint configured by the user. These requests inspect and synchronize the selected private bucket. Isomite has no developer-operated backend, analytics, telemetry, advertising, or account system.
+## Encryption, in plain language
 
-The endpoint, bucket name, Access Key ID, Secret Access Key, encryption passphrase, and any imported recovery key are stored by Obsidian in `.obsidian/plugins/isomite/data.json`. Obsidian plugin settings are plaintext local data, so protect the device and vault accordingly. Sync baselines and crash journals stored there are separately encrypted. Isomite never uploads its own plugin folder. Do not commit or share `data.json`.
+### Vault passphrase
 
-The encryption metadata object contains a random salt and encrypted key verifier. The salt is not secret, and the verifier does not reveal the passphrase. Vault content and revision metadata are encrypted before upload; filenames and paths are not stored as readable R2 object keys.
+The vault passphrase creates the keys that encrypt the vault before data leaves Obsidian. Every device must be able to unlock the same encrypted vault.
 
-## Sync progress and interruption safety
+### Recovery key
 
-Select the **Isomite sync** ribbon icon to scan and sync without opening settings. Only one sync can run at a time, and a persistent notice reports its current stage and percentage. Before commit, the ribbon changes to a stop icon and can cancel the run. Recent encrypted revisions can be viewed under **Settings → Isomite → Sync history**; the list is informational and does not restore older revisions.
+The recovery key is an emergency way to unlock the encrypted vault if the passphrase is forgotten. It contains sensitive key material. Save it outside the vault, preferably in a password manager.
 
-Before the atomic remote-head commit, cancellation or failure does not activate the prepared revision or apply local changes. Deduplicated encrypted blobs uploaded during preparation may remain unreferenced until cleanup. After the commit, the ribbon becomes a non-cancellable progress icon and local application is stored in an encrypted journal; if Obsidian closes, Isomite resumes that committed work before allowing a newer sync.
+### Pairing code
 
-## Current safety limits
+The pairing code is for adding a device. It includes both R2 access and encryption access. It is more convenient than entering setup details manually, but it must remain secret.
 
-- The connection test never writes to or deletes from R2.
-- **Verify encryption** creates only `_isomite/encryption-v1.json`; it does not upload vault files.
-- The first approved upload creates a local ZIP under `.isomite-backups/` before changing R2; this folder is never synchronized.
-- Do not run Isomite alongside Obsidian Sync, Twine, LiveSync, or another vault synchronization system.
-- Use a dedicated test bucket and a copied vault while Isomite is under development.
+Isomite uses AES-256-GCM and derives separate keys for content encryption, hidden object names, and keyed content hashes. The remote bucket does not contain readable note names or vault paths.
+
+## Sync history
+
+Open **Settings → Isomite → Sync history** to see recent encrypted revisions. Each entry shows:
+
+- Date and time
+- Device name
+- Revision number
+- Added, updated, deleted, and conflict counts
+
+Sync history is currently informational. It does not restore an older revision.
+
+## Safety and conflict handling
+
+- The first approved upload creates a local ZIP backup under `.isomite-backups/`.
+- Deletions use the vault's local trash instead of permanently deleting files immediately.
+- R2 revisions are immutable, and the current revision changes atomically.
+- A second device cannot silently overwrite a revision committed first by another device.
+- Cancellation before commit applies none of the confirmed changes.
+- After commit, Isomite finishes safely and resumes after interruption if necessary.
+- Error notices explain what happened, whether anything was committed, and what to do next.
+- Startup and save triggers only check for pending changes. They never apply changes without confirmation.
+
+## Privacy and local secrets
+
+Isomite sends HTTPS requests only to the Cloudflare R2 S3 endpoint you configure. It has no telemetry, analytics, advertising, developer-operated backend, or Isomite account service.
+
+The endpoint, bucket name, Access Key ID, Secret Access Key, vault passphrase, and imported recovery key are stored locally by Obsidian in `.obsidian/plugins/isomite/data.json`. Obsidian plugin settings are plaintext local data, so protect the device and never commit or share that file. Sync checkpoints and interruption journals inside it are separately encrypted.
+
+Cloudflare can see normal storage metadata such as object sizes, request timing, and the Isomite object-key structure. It cannot read the encrypted vault content, filenames, paths, or revision details without the vault key.
+
+## Before you use it
+
+- Do not run Isomite alongside any official or unofficial Obsidian sync solution on the same vault.
+- Keep an independent backup. Synchronization is not a replacement for backup.
+- Use one dedicated R2 bucket per Isomite vault.
+- Cloudflare R2 usage and billing belong to your Cloudflare account.
+- Isomite requires Obsidian `1.13.0` or newer.
+
+## Frequently asked questions
+
+### Is Isomite a self-hosted Obsidian sync server?
+
+No server is required. Isomite connects directly from Obsidian to a private Cloudflare R2 bucket. The storage account is yours, while Cloudflare operates the storage service.
+
+### Is this the official Obsidian Sync service?
+
+No. Isomite is an independent community plugin and is not affiliated with the official Obsidian Sync service.
+
+### Does encrypted Obsidian sync work on mobile?
+
+Yes. Isomite uses Obsidian's network API and native WebCrypto, so the same encrypted R2 sync format works on Obsidian desktop and mobile.
+
+### Does Isomite sync automatically?
+
+It can check for changes after startup or saves, but it does not apply them automatically. You still confirm the sync plan.
+
+### Can I inspect my notes in the R2 dashboard?
+
+No. Note contents, filenames, paths, and revision metadata are encrypted before upload. The R2 dashboard shows encrypted Isomite objects rather than readable vault files.
 
 ## Development
 
@@ -100,7 +169,7 @@ npm run build
 
 The production bundle is written to `main.js`. See [CONTRIBUTING.md](CONTRIBUTING.md) for issue, pull-request, security, and release guidance.
 
-Release assets include GitHub build-provenance attestations. After downloading a release asset, verify it with:
+Release assets include GitHub build-provenance attestations. Verify a downloaded release asset with:
 
 ```bash
 gh attestation verify main.js --repo ratatulieoi/obsidian-isomite
